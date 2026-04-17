@@ -1,0 +1,39 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.5.11612.153 insiders
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TunnelViewerSDK", "SDK\TunnelViewerSDK.vcxproj", "{0F7AB0BD-DF96-3C3E-A160-ABA21BB66CCD}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DemoApp", "DemoApp\DemoApp.vcxproj", "{48DA7DDC-635D-3FF5-AD7E-B97D457B802C}"
+	ProjectSection(ProjectDependencies) = postProject
+		{0F7AB0BD-DF96-3C3E-A160-ABA21BB66CCD} = {0F7AB0BD-DF96-3C3E-A160-ABA21BB66CCD}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ImageSlicer", "ImageSlicer\ImageSlicer.vcxproj", "{BCF82052-DDB0-3C2F-8363-197401F98DA3}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{0F7AB0BD-DF96-3C3E-A160-ABA21BB66CCD}.Debug|x64.ActiveCfg = Debug|x64
+		{0F7AB0BD-DF96-3C3E-A160-ABA21BB66CCD}.Debug|x64.Build.0 = Debug|x64
+		{0F7AB0BD-DF96-3C3E-A160-ABA21BB66CCD}.Release|x64.ActiveCfg = Release|x64
+		{0F7AB0BD-DF96-3C3E-A160-ABA21BB66CCD}.Release|x64.Build.0 = Release|x64
+		{48DA7DDC-635D-3FF5-AD7E-B97D457B802C}.Debug|x64.ActiveCfg = Debug|x64
+		{48DA7DDC-635D-3FF5-AD7E-B97D457B802C}.Debug|x64.Build.0 = Debug|x64
+		{48DA7DDC-635D-3FF5-AD7E-B97D457B802C}.Release|x64.ActiveCfg = Release|x64
+		{48DA7DDC-635D-3FF5-AD7E-B97D457B802C}.Release|x64.Build.0 = Release|x64
+		{BCF82052-DDB0-3C2F-8363-197401F98DA3}.Debug|x64.ActiveCfg = Debug|x64
+		{BCF82052-DDB0-3C2F-8363-197401F98DA3}.Debug|x64.Build.0 = Debug|x64
+		{BCF82052-DDB0-3C2F-8363-197401F98DA3}.Release|x64.ActiveCfg = Release|x64
+		{BCF82052-DDB0-3C2F-8363-197401F98DA3}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {2A0980C0-E51B-46C6-AA9C-37E9274B155B}
+	EndGlobalSection
+EndGlobal

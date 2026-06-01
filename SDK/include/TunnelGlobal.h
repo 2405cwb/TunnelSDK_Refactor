@@ -45,6 +45,25 @@ struct DbImageInfo {
 
 // 🟢 业务病害类型配置结构体
 struct DefectTypeConfig {
+    DefectTypeConfig()
+        : defaultShape(Shape_Line), defectCode(0) {}
+
+    DefectTypeConfig(int code, const QString& name, const DrawShape shape,
+        const QPen& defectPen, const QBrush& defectBrush)
+        : defaultShape(shape), defectCode(code), typeName(name),
+          pen(defectPen), brush(defectBrush) {}
+
+    DefectTypeConfig(int code, const QString& name, const DrawShape shape,
+        const QPen& defectPen, const QBrush& defectBrush, const QString&)
+        : defaultShape(shape), defectCode(code), typeName(name),
+          pen(defectPen), brush(defectBrush) {}
+
+    DefectTypeConfig(int code, const QString& name,
+        const QPen& defectPen, const QBrush& defectBrush)
+        : defaultShape(Shape_Line), defectCode(code), typeName(name),
+          pen(defectPen), brush(defectBrush) {}
+
+    DrawShape defaultShape;
     int defectCode;          // 业务代码 (例如：101代表纵向裂缝, 301代表掉块)
     QString typeName;        // 名称 
     // DrawShape defaultShape;  // 该病害对应的默认几何类型 (画线还是画面)

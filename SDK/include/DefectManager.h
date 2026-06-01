@@ -55,6 +55,16 @@ public:
 
 
     // 根据业务代码获取完整配置
+    QList<DefectTypeConfig> getConfigsByShape(DrawShape shapeType) const {
+        QList<DefectTypeConfig> result;
+        for (auto it = m_configs.begin(); it != m_configs.end(); ++it) {
+            if (it.value().defaultShape == shapeType) {
+                result.append(it.value());
+            }
+        }
+        return result;
+    }
+
     DefectTypeConfig getConfig(int defectCode) const {
         if (m_configs.contains(defectCode)) {
             return m_configs.value(defectCode);
@@ -126,7 +136,7 @@ public:
     }
 
     void removeDefect(DefectShapeItem* item) {
-        QString uuid = item->getUuid();
+        QString uuid = QString::number(item->getUuid());
         if (m_items.remove(item->getUuid())) {
             m_scene->removeItem(item);
             delete item;

@@ -14,13 +14,14 @@ CONFIG += c++11 console
 CONFIG(debug, debug|release) {
     LIBS += -L$$OUT_PWD/../SDK/debug/ -lTunnelViewerSDK
 } else {
-    LIBS += -L$$OUT_PWD/../SDK/release/ -lTunnelViewerSDK
+    LIBS += -L$$PWD/../bin/Release-X64/ -lTunnelViewerSDK
 }
 
 # 1. 包含 SDK 的头文件路径，这样同事写代码才有自动补全
 INCLUDEPATH += $$PWD/../SDK/include \
                $$PWD/../SDK/src \
-			   $$PWD/../SDK/src/items 
+			   $$PWD/../SDK/src/items \
+               $$PWD/../ImageSlicer/opencv480/include
 
 
 SOURCES += main.cpp 

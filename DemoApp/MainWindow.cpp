@@ -359,8 +359,7 @@ void MainWindow::initConnections()
         // ==========================================
         // 🟢 8. 生成并交还给 SDK
         // ==========================================
-        shapeType = DrawShape::Shape_Line;
-        DefectShapeItem* defectItem = new DefectShapeItem(path, finalName, shapeType);
+        DefectShapeItem* defectItem = new DefectShapeItem(path, finalName, shapeType, selectedCode);
         
       //  defectItem->setMoveAxis(Axis_Horizontal); // 💥 锁定水平移动！
       ;
@@ -534,7 +533,7 @@ void MainWindow::keyPressEvent(QKeyEvent* event)
             path.lineTo(x + defectSize, y + defectSize);
 
             QString testName = QString("Test_%1").arg(i);
-            DefectShapeItem* item = new DefectShapeItem(path, testName, Shape_Line);
+            DefectShapeItem* item = new DefectShapeItem(path, testName, Shape_Line, 100000 + i);
             item->setProperty("defectCode", codes[qrand() % 4]);
 
             // 💥 关键：既然要进数据库，必须赋予里程属性！(这里简单把 X 坐标当做里程)

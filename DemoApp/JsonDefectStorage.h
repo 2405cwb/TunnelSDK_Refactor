@@ -24,7 +24,7 @@ public:
             QJsonObject defectObj = val.toObject();
 
             DefectData data;
-            data.uuid = defectObj["uuid"].toString();
+            data.uuid = defectObj["uuid"].toInt();
             data.name = defectObj["name"].toString();
             data.type = static_cast<DrawShape>(defectObj["type"].toInt());
             data.attributes = defectObj["attributes"].toObject().toVariantMap();
@@ -115,7 +115,7 @@ public:
         QList<DefectData> all = loadAll(uri);
         // 移除匹配 UUID 的那条数据
         all.erase(std::remove_if(all.begin(), all.end(),
-            [&](const DefectData& d) { return d.uuid == uuid; }), all.end());
+            [&](const DefectData& d) { return QString::number(d.uuid) == uuid; }), all.end());
         return saveAll(all, uri);
     }
 };

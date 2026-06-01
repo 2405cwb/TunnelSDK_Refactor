@@ -196,7 +196,7 @@ private:
     // 解析单行 SQL 数据组装成 DefectData
     DefectData parseRowToDefect(QSqlQuery& query) const {
         DefectData data;
-        data.uuid = query.value("uuid").toString();
+        data.uuid = query.value("uuid").toInt();
         data.name = query.value("name").toString();
         data.type = static_cast<DrawShape>(query.value("type").toInt());
 

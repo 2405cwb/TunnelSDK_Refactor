@@ -7,13 +7,14 @@
 #include <QtMath>
 #include <QMenu>
 #include <QMessageBox>
+
 #include "./tools/DefectDrawTool.h"
 #include "./items/DefectShapeItem.h"
-#include<QSqlDatabase>
-#include<QSqlQuery>
-#include<QUuid>
+
 TiledGraphicsView::TiledGraphicsView(QWidget* parent) : QGraphicsView(parent),m_scrollSpeed(50), m_orientation(LayoutOrientation::Horizontal)
 { 
+	m_curDrawShape = Shape_Line;
+
     // 🐶 看门狗： 
     if (this->devicePixelRatio() > 1.0) {
         if (!QCoreApplication::testAttribute(Qt::AA_EnableHighDpiScaling)) {
@@ -23,36 +24,62 @@ TiledGraphicsView::TiledGraphicsView(QWidget* parent) : QGraphicsView(parent),m_
             // 这里仅仅打印日志，不弹窗也不崩溃，起到提示作用即可
         }
     }
-    
     // 配置 GraphicsView (硬件加速、事件拦截)
     setupGraphicsView();
     // 绑定信号槽、快捷键、定时器
     setupConnections();
 	setViewMode(Mode_Browse);
-    // 🟢 挂载万能绘制工具，并告诉它画什么形状
-    m_currentTool = new DefectDrawTool(m_curDrawShape);
-    m_currentTool->setView(this);
+	// 🟢 挂载万能绘制工具，并告诉它画什么形状
+	m_currentTool = new DefectDrawTool(m_curDrawShape);
+	m_currentTool->setView(this);
 }
 
 TiledGraphicsView::~TiledGraphicsView()
 { 
     clear();
+	delete m_currentTool;
+	m_currentTool = nullptr;
 }
 
-QPointF TiledGraphicsView::mapToGlobalScene(const QString& imageName, qreal localX, qreal localY)
+// 设置视图名称
+void TiledGraphicsView::setViewName(QString strName)
 {
-    // 1. 遍历管理的所有图片切片段
-    for (TunnelSectionItem* item : m_items) {
+	m_strViewName = strName;
+}
 
-        // 2. 匹配图片名称
-        if (item->getImageName() == imageName) {
+// 获取视图名称
+QString TiledGraphicsView::getViewName()
+{
+	return m_strViewName;
+}
 
-            return item->mapToScene(QPointF(localX, localY));
-        }
-    }
-     
-    qWarning() << "⚠️ 坐标映射失败：未找到名称为" << imageName << "的图层。";
-    return QPointF(0, 0);
+QPointF TiledGraphicsView::mapToGlobalScene(const QString & imageName, qreal localX, qreal localY)
+{
+	for (TunnelSectionItem* item : m_items)
+	{
+		if (item->getImageName().contains(imageName))
+		{
+			return item->mapToScene(QPointF(localX, localY));
+
+		}
+	}
+	//if (m_items.size()==0)
+	//{
+	//	return QPointF(0,0);
+	//}
+	double curImageMile = imageName.split("-").at(0).mid(4).toDouble();
+	double BegImageMile = m_items[0]->getImageName().split("-").at(0).mid(4).toDouble();
+	if (curImageMile <= BegImageMile)
+	{
+		return  m_items[0]->mapToScene(QPointF(0, localY));
+	}
+	else
+	{
+		return  m_items[m_items.size() - 1]->mapToScene(QPointF(m_items[m_items.size() - 1]->boundingRect().width(), localY));
+	}
+
+	qWarning() << QString::fromLocal8Bit("坐标映射失败:未找到名称为") << imageName << "的图层";
+	return QPointF(0, 0);
 }
 
 void TiledGraphicsView::focusOnPosition(const QPointF& scenePos, double targetScale)
@@ -70,8 +97,32 @@ void TiledGraphicsView::focusOnPosition(const QPointF& scenePos, double targetSc
         m_currentScale = targetScale;
     }
 
-    // 💥 2. 核心神技：自动计算滚动条并居中目标点！
+    // 自动计算滚动条并居中目标点！
     centerOn(scenePos);
+
+
+	// 🟢直接问 Scene 谁在这个点上，不用自己遍历 list
+	// items() 返回的是 Z 值从上到下的列表，第一个通常就是最上面的
+	QList<QGraphicsItem*> items = m_scene->items(scenePos);
+	TunnelSectionItem* hoverItem = nullptr;
+	for (auto item : items) {
+		// 使用 dynamic_cast 确认是不是我们要找的切片层
+		hoverItem = dynamic_cast<TunnelSectionItem*>(item);
+		if (hoverItem) break;
+	}
+
+	// 3. 发送坐标信号给外部 HUD
+	if (hoverItem) {
+		QPointF localPos = hoverItem->mapFromScene(scenePos);
+		emit sigCursorInfoChanged(
+			hoverItem->getImageName(),
+			(int)localPos.x(),
+			(int)localPos.y()
+		);
+	}
+	else {
+		emit sigCursorInfoChanged("", 0, 0);
+	}
 
     // 3. 强制触发一次高清切片加载和 LOD 刷新
     updateVisibleTiles();
@@ -80,7 +131,7 @@ void TiledGraphicsView::focusOnPosition(const QPointF& scenePos, double targetSc
 void TiledGraphicsView::addLayer(AbstractTileSource* source)
 {
     TunnelSectionItem* item = new TunnelSectionItem(source);
-    connect(item, &TunnelSectionItem::sigTilesUpdated, this, &TiledGraphicsView::updateHUD);
+	connect(item, &TunnelSectionItem::sigTilesUpdated, this, &TiledGraphicsView::updateHUD);
     m_scene->addItem(item);
 
     // 🟢 自动拼接逻辑
@@ -89,6 +140,16 @@ void TiledGraphicsView::addLayer(AbstractTileSource* source)
     if (!m_items.isEmpty()) {
         TunnelSectionItem* last = m_items.last();
         offsetX = last->pos().x() + last->boundingRect().width();
+		
+		if (m_items.size() <= 1)
+		{
+			last->m_senceRect = QRectF(0, 0, last->boundingRect().width(), last->boundingRect().height());
+		}
+		else
+		{
+			last->m_senceRect = QRectF(last->pos().x(), 0, last->boundingRect().width(), last->boundingRect().height());
+		}
+	
     }
 
     item->setPos(offsetX, 0);
@@ -111,8 +172,19 @@ void TiledGraphicsView::addLayer(AbstractTileSource* source)
 
 void TiledGraphicsView::clear()
 {
+	if (m_vecCp3Manager) m_vecCp3Manager->clearDefects();
+	if (m_vecPlatformManager) m_vecPlatformManager->clearDefects();
+	if (m_vecChainManager) m_vecChainManager->clearDefects();
+	if (m_defectManager) m_defectManager->clearDefects();
+	if (m_vecTunnelLocManager) m_vecTunnelLocManager->clearDefects();
+	if (m_vecRingInfoManager) m_vecRingInfoManager->clearDefects();
+	if (m_vecSectionManager) m_vecSectionManager->clearDefects();
+	if (m_vecReAutoRingManager) m_vecReAutoRingManager->clearDefects();
+	if (m_currentTool) m_currentTool->deactivate();
+
     m_scene->clear(); // 这会 delete 掉所有的 item
     m_items.clear();
+	m_exportBoxItem = nullptr;
     m_scene->setSceneRect(0, 0, 0, 0);
 }
 
@@ -128,43 +200,71 @@ void TiledGraphicsView::resetToFit()
 }
 
 
+void TiledGraphicsView::updateHUD()
+{
+	int loadedTiles = 0;
+	for (auto item : m_items) {
+	 
+		loadedTiles += item->getLoadedTileCount();
+	}
+ bool	isHighResMode = false;
+	if (loadedTiles > 0)
+	{
+		isHighResMode = true;
+	}
+
+	
+	QString quality = isHighResMode ? QString::fromLocal8Bit("高清") : QString::fromLocal8Bit("预览");
+
+	QString stats = QString::fromLocal8Bit(
+		"绘制模式: %1 | 切片: %2 | 缩放: %3% | 画质: %4 |LOD系数: %5"
+	).arg(DrawModelStr).arg(loadedTiles)
+		.arg(m_currentScale * 100, 0, 'f', 0).arg(quality)
+		.arg(m_lodThresholdMultiplier, 0, 'f', 2);
+
+	emit sigStatsUpdated(stats);
+}
+
 void TiledGraphicsView::setViewMode(ViewMode mode)
-{ 
-    m_currentMode = mode;
-    setDragMode(QGraphicsView::NoDrag);
-    // 🟢 1. 无论切到什么模式，先把上一次的截取框藏起来
-    if (m_exportBoxItem) {
-        m_exportBoxItem->hide();
-    }
+{
+    m_currentMode = mode; 
+ 	setDragMode(QGraphicsView::NoDrag);
+	if (m_exportBoxItem)
+	{
+		m_exportBoxItem->hide();
+	}
     if (mode == Mode_Browse) {
         setDragMode(QGraphicsView::NoDrag);
         setCursor(Qt::ArrowCursor);
 		DrawModelStr = QString::fromLocal8Bit("浏览模式");
     }
-    else if (mode == Mode_Draw) {
-        setDragMode(QGraphicsView::NoDrag);
-        setCursor(Qt::CrossCursor); // 绘图模式用十字光标
+    else if (mode == Mode_Draw)
+    {
+		setDragMode(QGraphicsView::NoDrag);
+		setCursor(Qt::CrossCursor); // 绘图模式用十字光标
 		DrawModelStr = QString::fromLocal8Bit("绘图模式");
-         
+
+		startDrawingDefect(m_curDrawShape);
     }
-    // 🟢 2. 新增截取模式的专属配置
-    // =========================================================
-    else if (mode == Mode_ExportBox) {
-        setCursor(Qt::BlankCursor); // 隐藏鼠标默认箭头，让用户的视觉完全集中在虚线框上
-        DrawModelStr = QString::fromLocal8Bit("定焦截图模式");
+	else if (mode == Mode_ExportBox)
+     {
 
-        if (!m_exportBoxItem) {
-            m_exportBoxItem = new QGraphicsRectItem();
-            QPen pen(Qt::yellow, 3, Qt::DashLine);
-            pen.setCosmetic(true); // 💥 核心魔法：开启化妆笔模式，无论视图怎么缩放，虚线框永远保持 3 像素粗细，绝不会糊成一团！
-            m_exportBoxItem->setPen(pen);
-            m_exportBoxItem->setZValue(9999); // 永远压在所有切片和病害的最上层
-            m_scene->addItem(m_exportBoxItem);
-        }
+		setCursor(Qt::BlankCursor);
+		DrawModelStr = QString::fromLocal8Bit("定焦截图模式");
+		if (!m_exportBoxItem)
+		{
+			m_exportBoxItem = new QGraphicsRectItem;
+			QPen pen(Qt::yellow, 3, Qt::DashLine);
+			pen.setCosmetic(true);
+			m_exportBoxItem->setPen(pen);
+			m_exportBoxItem->setZValue(9999);
+			m_scene->addItem(m_exportBoxItem);
+		}
+		m_exportBoxItem->setRect(0, 0, exportBoxSize, exportBoxSize);
+		m_exportBoxItem->show();
+     
+    }
 
-        m_exportBoxItem->setRect(0, 0, 1680, 1680);
-        m_exportBoxItem->show();
-        }
     // 可以在这里触发 updateVisibleTiles 以刷新可能的 UI 状态
 	updateVisibleTiles();
 }
@@ -176,13 +276,13 @@ void TiledGraphicsView::setViewMode(ViewMode mode)
 void TiledGraphicsView::scrollContentsBy(int dx, int dy)
 {
     QGraphicsView::scrollContentsBy(dx, dy);
-    if (horizontalScrollBar()->isSliderDown() || verticalScrollBar()->isSliderDown()) { 
-        m_debounceTimer->start();
-        return;
-    }
-
-    // 只有非拖拽产生的滑动（比如鼠标滚轮、键盘方向键），才做瞬发预加载
-  
+	if (horizontalScrollBar()->isSliderDown() || verticalScrollBar()->isSliderDown())
+	{
+		m_debounceTimer->start();
+		return;
+	} 
+	
+    // 触发防抖更新 (LOD 计算)
     m_debounceTimer->start();
 }
 
@@ -227,7 +327,7 @@ void TiledGraphicsView::wheelEvent(QWheelEvent* event) {
 
         // [上限]：最大允许放大到 5.0 倍 (即 1 个像素变 5 个像素大)
         // 隧道病害一般看清裂缝即可，5.0 足够了，太大全是锯齿
-        double maxScale = 5.0;
+        double maxScale = 20.0;
 
       
         // 如果下一次缩放会超出边界，就只缩放到边界值
@@ -247,8 +347,8 @@ void TiledGraphicsView::wheelEvent(QWheelEvent* event) {
             scale(scaleFactor, scaleFactor);
             m_currentScale = nextScale; // 更新成员变量
             double minScale = getFitScale();
-            bool isFitState = (m_currentScale <= minScale + 0.001); 
-            
+            bool isFitState = (m_currentScale <= minScale + 0.001);
+           
             updateVisibleTiles();       // 触发 LOD
         }
 
@@ -301,7 +401,9 @@ void TiledGraphicsView::keyPressEvent(QKeyEvent* event) {
     if (isShift) {
         speed *= 4;
         m_isFastScrolling = true; // 🚨 进入飙车模式
-    } 
+    }
+   
+
     switch (event->key()) {
     case Qt::Key_Space:
         resetToFit();   // 调用之前封装好的公有槽函数
@@ -353,8 +455,7 @@ void TiledGraphicsView::keyPressEvent(QKeyEvent* event) {
 }
 
 void TiledGraphicsView::keyReleaseEvent(QKeyEvent* event)
-{
-  
+{ 
     if (event->key() == Qt::Key_Shift) {
         m_isFastScrolling = false; // 🚨 飙车结束
 
@@ -367,95 +468,86 @@ void TiledGraphicsView::keyReleaseEvent(QKeyEvent* event)
 
 void TiledGraphicsView::mouseMoveEvent(QMouseEvent* event)
 {
+	QPointF scensPos = mapToScene(event->pos());
 
-    // 1. 获取鼠标在 Scene 中的绝对物理坐标
-    QPointF scenePos = mapToScene(event->pos());
+	if (m_currentMode == Mode_ExportBox && m_exportBoxItem)
+	{
+		QRectF boxRect(0,0, exportBoxSize, exportBoxSize);
+		boxRect.moveCenter(scensPos);
+		m_exportBoxItem->setRect(boxRect);
+	}
+	// 🟢 1. 处理中键拖拽
+	if (m_isPanning) {
+		// 计算鼠标移动的差值
+		int dx = event->pos().x() - m_lastMousePos.x();
+		int dy = event->pos().y() - m_lastMousePos.y();
 
-    // =========================================================
-    // 🟢 新增：截图模式下，让 1680x1680 的矩形中心死死吸附住鼠标！
-    // =========================================================
-    if (m_currentMode == Mode_ExportBox && m_exportBoxItem) {
-        QRectF boxRect(0, 0, exprotBoxSize, exprotBoxSize);
-        boxRect.moveCenter(scenePos); // 让矩形的中心点对准鼠标
-        m_exportBoxItem->setRect(boxRect);
-    }
+		// 拨动滚动条 (方向相反，鼠标往右划，内容往右走，滚动条其实是往左减)
+		horizontalScrollBar()->setValue(horizontalScrollBar()->value() - dx);
+		verticalScrollBar()->setValue(verticalScrollBar()->value() - dy); 
+		// 更新坐标
+		m_lastMousePos = event->pos();
+		event->accept();
+		return;  
+	}
+
+	// 🟢 绘图模式拦截：让工具画出跟随的虚线
+	if (m_currentMode == Mode_Draw && m_currentTool) {
+		QPointF scenePos = mapToScene(event->pos());
+		m_currentTool->handleMouseMove(scenePos);
+	}
+	// 💥 3. 核心引擎：自定义病害集群精准拖拽！
+	// ==========================================
+	// 如果左键按下并处于拖拽状态，接管坐标换算
+	if (m_isDraggingDefects) {
+		QPointF currentScenePos = mapToScene(event->pos());
+		// 计算鼠标在真实的物理世界里移动了多少距离
+		QPointF delta = currentScenePos - m_lastDragScenePos;
+
+		// 让所有被选中的病害跟着走，指哪打哪，绝对不乱飘！
+		for (QGraphicsItem* item : m_scene->selectedItems()) {
+			if (DefectShapeItem* defect = dynamic_cast<DefectShapeItem*>(item)) {
+				defect->setPos(defect->pos() + delta);
+			}
+		}
+
+		m_lastDragScenePos = currentScenePos; // 更新坐标
+		event->accept();
+		return; //  
+	}
+	// ==========================================
+	// 💥 4. 浏览模式下的光标“雷达反馈”
+	// ==========================================
+	// 只有在没按任何鼠标键（纯移动探测）时，才触发嗅探
+	if (m_currentMode == Mode_Browse && event->buttons() == Qt::NoButton) {
+
+		// 调用我们强大的动态物理雷达探测器
+		QList<QGraphicsItem*> items = getVisualItems(event->pos());
+
+		bool hoverOnDefect = false;
+		for (auto item : items) {
+			if (dynamic_cast<DefectShapeItem*>(item)) {
+				hoverOnDefect = true;
+				break; // 只要探测到范围里有病害，立刻标记
+			}
+		}
+
+		// 🟢 动态切换光标：碰到病害变“点击小手👆”，离开变“普通箭头↖”
+		if (hoverOnDefect) {
+			setCursor(Qt::PointingHandCursor);
+		}
+		else {
+			setCursor(Qt::ArrowCursor);
+		}
+	}
 
 
-    // 🟢 1. 处理中键拖拽
-    if (m_isPanning) {
-        // 计算鼠标移动的差值
-        int dx = event->pos().x() - m_lastMousePos.x();
-        int dy = event->pos().y() - m_lastMousePos.y();
-
-        // 拨动滚动条 (方向相反，鼠标往右划，内容往右走，滚动条其实是往左减)
-        horizontalScrollBar()->setValue(horizontalScrollBar()->value() - dx);
-        verticalScrollBar()->setValue(verticalScrollBar()->value() - dy);
-
-        // 更新坐标
-        m_lastMousePos = event->pos();
-        event->accept();
-        return; // 拖拽时就不要往下执行获取十字坐标的逻辑了
-    }
-
-    // 🟢 绘图模式拦截：让工具画出跟随的虚线
-    if (m_currentMode == Mode_Draw && m_currentTool) {
-        QPointF scenePos = mapToScene(event->pos());
-        m_currentTool->handleMouseMove(scenePos);
-    }
 
 
-    // ==========================================
-    // 💥 3. 核心引擎：自定义病害集群精准拖拽！
-    // ==========================================
-    // 如果左键按下并处于拖拽状态，接管坐标换算
-    if (m_isDraggingDefects) {
-        QPointF currentScenePos = mapToScene(event->pos());
-        // 计算鼠标在真实的物理世界里移动了多少距离
-        QPointF delta = currentScenePos - m_lastDragScenePos;
-
-        // 让所有被选中的病害跟着走，指哪打哪，绝对不乱飘！
-        for (QGraphicsItem* item : m_scene->selectedItems()) {
-            if (DefectShapeItem* defect = dynamic_cast<DefectShapeItem*>(item)) {
-                defect->setPos(defect->pos() + delta);
-            }
-        }
-
-        m_lastDragScenePos = currentScenePos; // 更新坐标
-        event->accept();
-        return; // 💥 拦截死，绝不让 Qt 引擎底层乱发事件！
-    }
-    // ==========================================
-    // 💥 4. 浏览模式下的光标“雷达反馈”
-    // ==========================================
-    // 只有在没按任何鼠标键（纯移动探测）时，才触发嗅探
-    if (m_currentMode == Mode_Browse && event->buttons() == Qt::NoButton) {
-
-        // 调用我们强大的动态物理雷达探测器
-        QList<QGraphicsItem*> items = getVisualItems(event->pos());
-
-        bool hoverOnDefect = false;
-        for (auto item : items) {
-            if (dynamic_cast<DefectShapeItem*>(item)) {
-                hoverOnDefect = true;
-                break; // 只要探测到范围里有病害，立刻标记
-            }
-        }
-
-        // 🟢 动态切换光标：碰到病害变“点击小手👆”，离开变“普通箭头↖”
-        if (hoverOnDefect) {
-            setCursor(Qt::PointingHandCursor);
-        }
-        else {
-            setCursor(Qt::ArrowCursor);
-        }
-    }
-
-    // 让父类干活（处理剩下的常规逻辑）
     QGraphicsView::mouseMoveEvent(event);
 
-
-
-    // 1. 获取鼠标在 Scene 中的坐标 
+    // 1. 获取鼠标在 Scene 中的坐标
+    QPointF scenePos = mapToScene(event->pos());
 
     // 🟢直接问 Scene 谁在这个点上，不用自己遍历 list
     // items() 返回的是 Z 值从上到下的列表，第一个通常就是最上面的
@@ -485,157 +577,159 @@ void TiledGraphicsView::mouseMoveEvent(QMouseEvent* event)
     }
 }
 
- 
 void TiledGraphicsView::mousePressEvent(QMouseEvent* event)
-{
-    // 1. 中键拖拽背景
-    if (event->button() == Qt::MiddleButton) {
-        m_isPanning = true;
-        m_lastMousePos = event->pos();
-        setCursor(Qt::ClosedHandCursor);
-        event->accept();
-        return;
-    }
+{ 
+	// 1. 中键拖拽背景
+	if (event->button() == Qt::MiddleButton) {
+		m_isPanning = true;
+		m_lastMousePos = event->pos();
+		setCursor(Qt::ClosedHandCursor);
+		event->accept();
+		return;
+	}
 
-    // 2. 绘图模式
-    if (m_currentMode == Mode_Draw && m_currentTool) {
-		QPointF scenePos = mapToScene(event->pos());
-        m_currentTool->handleMousePress(scenePos, event->button());
-        event->accept();
-        return;
-    }
-    // =========================================================
-    // 🟢 新增：定焦截图模式下，右键扣动扳机！
-    // =========================================================
-    if (m_currentMode == Mode_ExportBox && event->button() == Qt::RightButton) {
-        if (m_exportBoxItem) {
-            // 获取当前虚线框在物理世界中的绝对坐标范围
-            QRectF exportRect = m_exportBoxItem->rect();
+	// 2. 绘图模式
+	if (m_currentMode == Mode_Draw && m_currentTool) {
+		m_currentTool->handleMousePress(mapToScene(event->pos()), event->button());
+		event->accept();
+		return;
+	}
+	 if (m_currentMode == Mode_ExportBox && event->button() == Qt::RightButton)
+	 {
+		 if (m_exportBoxItem)
+		 {
+			 QRectF exprotRect = m_exportBoxItem->rect();
 
-            // 💥 直接调用你之前改好的神级查库导出函数！
-            // (这里的 Export_HighRes 请替换为你枚举里代表高清图的值，只要不是 Export_Thumbnail 就会走数据库查询)
-            QPixmap resultPix = exportRegionData(exportRect, Export_HighRes, false);
+			 QPixmap resultpix = exportRegionData(exprotRect, Export_HighRes, false);
+			 if (!resultpix.isNull())
+			 {
+				 emit sigRegionExported(resultpix);
+			 }
+		 }
+		 event->accept();
+		 return;
+	 }
+  
+	if (m_currentMode == Mode_Browse && event->button() == Qt::LeftButton)
+	{
+		if (event->modifiers() & Qt::ShiftModifier) {
+			setDragMode(QGraphicsView::RubberBandDrag);
+			QGraphicsView::mousePressEvent(event);
+			return;
+		}
+		else {
+			setDragMode(QGraphicsView::NoDrag);
 
-            if (!resultPix.isNull()) {
-                emit sigRegionExported(resultPix); // 抛出给外部的主 UI 去保存或预览
-            }
-        }
-        event->accept(); // 拦截死，不让它弹右键菜单
-        return;
-    }
+			QList<QGraphicsItem*> items = getVisualItems(event->pos());
+			DefectShapeItem* hitDefect = nullptr;
+			for (auto item : items) {
+				if (DefectShapeItem* defect = dynamic_cast<DefectShapeItem*>(item)) {
+					hitDefect = defect;
+					break;
+				}
+			}
 
-    // 3. 浏览模式左键
-    if (m_currentMode == Mode_Browse && event->button() == Qt::LeftButton)
-    {
-        if (event->modifiers() & Qt::ShiftModifier) {
-            setDragMode(QGraphicsView::RubberBandDrag);
-            QGraphicsView::mousePressEvent(event);
-            return;
-        }
-        else {
-            setDragMode(QGraphicsView::NoDrag);
+			if (hitDefect) {
+				if (!hitDefect->isSelected()) {
+					m_scene->clearSelection();
+					hitDefect->setSelected(true);
+				}
+				// 💥 核心开启：激活我们自己的上帝拖拽引擎！
+				m_isDraggingDefects = true;
+				m_lastDragScenePos = mapToScene(event->pos());
+				event->accept();
+				return;
+			}
+			else {
+				m_scene->clearSelection();
+			}
+		}
+	}
 
-            QList<QGraphicsItem*> items = getVisualItems(event->pos());
-            DefectShapeItem* hitDefect = nullptr;
-            for (auto item : items) {
-                if (DefectShapeItem* defect = dynamic_cast<DefectShapeItem*>(item)) {
-                    hitDefect = defect;
-                    break;
-                }
-            }
-
-            if (hitDefect) {
-                if (!hitDefect->isSelected()) {
-                    m_scene->clearSelection();
-                    hitDefect->setSelected(true);
-                }
-                // 💥 核心开启：激活我们自己的上帝拖拽引擎！
-                m_isDraggingDefects = true;
-                m_lastDragScenePos = mapToScene(event->pos());
-                event->accept();
-                return;
-            }
-            else {
-                m_scene->clearSelection();
-            }
-        }
-    }
-
-    // 4. 右键菜单
-    if (event->button() == Qt::RightButton) {
-        QList<QGraphicsItem*> items = getVisualItems(event->pos());
-        emit sigContextMenuRequested(event->globalPos(), items);
-        event->accept();
-        return;
-    }
+	if (event->button() == Qt::RightButton) {
+		QList<QGraphicsItem*> items = getVisualItems(event->pos());
+		emit sigContextMenuRequested(event->globalPos(), items);
+		event->accept();
+		return;
+	}
 
     QGraphicsView::mousePressEvent(event);
 }
 
-     
 void TiledGraphicsView::mouseReleaseEvent(QMouseEvent* event)
 {
-    if (m_isDraggingDefects && event->button() == Qt::LeftButton) {
-        m_isDraggingDefects = false;
 
-        // 遍历所有选中的兄弟，挨个结算最终坐标写入数据库
-        for (QGraphicsItem* item : m_scene->selectedItems()) {
-            if (DefectShapeItem* defect = dynamic_cast<DefectShapeItem*>(item)) {
-                defect->finalizeMove();
-            }
-        }
-        event->accept();
-        return;
-    }
-    //  必须在最前面调用父类，让 Qt 引擎优先结算框选逻辑
-    QGraphicsView::mouseReleaseEvent(event);
+	if (m_isDraggingDefects && event->button() == Qt::LeftButton) {
+		m_isDraggingDefects = false;
 
-    //  松开中键
-    if (event->button() == Qt::MiddleButton) {
-        m_isPanning = false;
+		// 遍历所有选中的兄弟，挨个结算最终坐标写入数据库
+		for (QGraphicsItem* item : m_scene->selectedItems()) {
+			if (DefectShapeItem* defect = dynamic_cast<DefectShapeItem*>(item)) {
+				defect->finalizeMove();
+			}
+		}
+		event->accept();
+		return;
+	} 
 
-        
-        if (m_currentMode == Mode_Browse) {
-            setCursor(Qt::ArrowCursor);
-        }
-        else {
-            setCursor(Qt::CrossCursor);
-        }
-        event->accept();
-        return;
-    }
+	//  必须在最前面调用父类，让 Qt 引擎优先结算框选逻辑
+	QGraphicsView::mouseReleaseEvent(event);
 
-    // ==========================================
-    //   浏览模式松开左键：结算并抛出框选结果
-    // ==========================================
-    if (m_currentMode == Mode_Browse && event->button() == Qt::LeftButton)
-    { 
-        if (dragMode() == QGraphicsView::RubberBandDrag) {
+	//  松开中键
+	if (event->button() == Qt::MiddleButton) {
+		m_isPanning = false;
 
-            QList<QGraphicsItem*> allSelected = m_scene->selectedItems();
-            QList<DefectShapeItem*> selectedDefects;
 
-            for (auto item : allSelected) {
-                if (DefectShapeItem* defect = dynamic_cast<DefectShapeItem*>(item)) {
-                    selectedDefects.append(defect);
-                }
-                else { 
-                    item->setSelected(false);
-                }
-            }
+		if (m_currentMode == Mode_Browse) {
+			setCursor(Qt::ArrowCursor);
+		}
+		else {
+			setCursor(Qt::CrossCursor);
+		}
+		event->accept();
+		return;
+	}
 
-            // 发送信号给 MainWindow
-            if (!selectedDefects.isEmpty()) {
-               
-                QTimer::singleShot(0, this, [this, selectedDefects]() {
-                    emit sigDefectsSelected(selectedDefects);
-                    });
-            }
-        } 
-        setDragMode(QGraphicsView::NoDrag);
-    }
+	// ==========================================
+	//   浏览模式松开左键：结算并抛出框选结果
+	// ==========================================
+	if (m_currentMode == Mode_Browse && event->button() == Qt::LeftButton)
+	{
+		if (dragMode() == QGraphicsView::RubberBandDrag) {
+
+			QList<QGraphicsItem*> allSelected = m_scene->selectedItems();
+			QList<DefectShapeItem*> selectedDefects;
+
+			for (auto item : allSelected) {
+				if (DefectShapeItem* defect = dynamic_cast<DefectShapeItem*>(item)) {
+
+					if (defect->m_elementType != Type_Disease)
+					{
+						item->setSelected(false);
+						continue;
+					}
+					selectedDefects.append(defect);
+				}
+				else {
+					item->setSelected(false);
+				}
+			}
+
+			// 发送信号给 MainWindow
+			if (!selectedDefects.isEmpty()) {
+
+				QTimer::singleShot(0, this, [this, selectedDefects]() {
+					emit sigDefectsSelected(selectedDefects);
+				});
+			}
+		}
+		setDragMode(QGraphicsView::NoDrag);
+	}
 }
- 
+
+// =========================================================
+// 🟢 核心逻辑与辅助函数
+// =========================================================
 
 void TiledGraphicsView::setupGraphicsView()
 {
@@ -677,7 +771,15 @@ void TiledGraphicsView::setupGraphicsView()
     setFocusPolicy(Qt::StrongFocus);
     setFocus(); // 启动时获取焦点
 
-    m_defectManager = new DefectManager(m_scene, this);
+	m_vecCp3Manager = new DefectManager(m_scene, this);
+	m_vecPlatformManager = new DefectManager(m_scene, this);
+	m_vecChainManager = new DefectManager(m_scene, this);
+	m_defectManager = new DefectManager(m_scene, this);
+	m_vecTunnelLocManager = new DefectManager(m_scene, this);
+	m_vecRingInfoManager = new DefectManager(m_scene, this);
+	m_vecSectionManager = new DefectManager(m_scene, this);
+	m_vecReAutoRingManager = new DefectManager(m_scene, this);
+
 }
 
 void TiledGraphicsView::setupConnections()
@@ -688,7 +790,7 @@ void TiledGraphicsView::setupConnections()
     m_debounceTimer->setInterval(15); // 15ms 延迟
 
     auto triggerScroll = [this]() {
-        m_debounceTimer->start(); // 💥 每次触发都重新计时，这才是真防抖！
+		m_debounceTimer->start();
         };
 
     // 3. 监听滚动条变化
@@ -696,62 +798,90 @@ void TiledGraphicsView::setupConnections()
     connect( verticalScrollBar(), &QScrollBar::valueChanged, this, triggerScroll); 
     connect(m_debounceTimer, &QTimer::timeout, this, &TiledGraphicsView::updateVisibleTiles);
 
-    auto onSliderReleased = [this]() {
-     
-        m_debounceTimer->start();   // 150ms后盖上高清图
-        };
-    connect(horizontalScrollBar(), &QScrollBar::sliderReleased, this, onSliderReleased);
-    connect(verticalScrollBar(), &QScrollBar::sliderReleased, this, onSliderReleased);
-     
+	auto onSilderReleased = [this]()
+	{ 
+		m_debounceTimer->start();
+	};
+	connect(horizontalScrollBar(), &QScrollBar::sliderReleased, this, onSilderReleased);
+	connect(verticalScrollBar(), &QScrollBar::sliderReleased, this, onSilderReleased);
+
+	 
+
+	// 获取视图窗口区间
+	connect(horizontalScrollBar(), &QScrollBar::valueChanged, this, [=]() {
+		QRect viewPortRect = viewport()->rect();
+
+		// 1. 获取鼠标在 Scene 中的坐标
+		QPointF sceneTopLPos = mapToScene(viewPortRect.topLeft());
+		QPointF sceneBottomRPos = mapToScene(viewPortRect.bottomRight());
+		QPointF centerPos = QPointF((sceneTopLPos.x() + sceneBottomRPos.x()) / 2.0, sceneTopLPos.y());
+
+		QString strNameL, strNameR;
+		int xL, yL, xR, yR;
+		bool bL = GlobalSceneToMap(sceneTopLPos, strNameL, xL, yL);
+		bool bR = GlobalSceneToMap(sceneBottomRPos, strNameR, xR, yR);
+
+		if (bL && bR)
+		{
+			emit sigViewInfoChanged(strNameL, xL, yL,
+				strNameR, xR, yR);
+		}
+
+	});
+
 }
 
 void TiledGraphicsView::updateVisibleTiles()
 {
-    if (m_isFastScrolling) {
-        return;
-    }
-    QElapsedTimer timer;
-    timer.start();
+	
+	QElapsedTimer timer;
+	timer.start();
 
-    // 1. 获取可视区域
-    QRect viewportRect = viewport()->rect();
-    QRectF visibleSceneRect = mapToScene(viewportRect).boundingRect();
+	// 1. 获取可视区域
+	QRect viewportRect = viewport()->rect();
+	QRectF visibleSceneRect = mapToScene(viewportRect).boundingRect();
 
-    // =========================================================
-    // 💥 终极丝滑魔法：双层空间结界！
-    // =========================================================
+	// =========================================================
+	// 💥 终极丝滑魔法：双层空间结界！
+	// =========================================================
 
-    // 【内层结界】：高清图的 Buffer (稍微外扩一点点，防边缘穿帮)
-    double highResBuffer = 512.0;
-    QRectF highResRect = visibleSceneRect.adjusted(-highResBuffer, -highResBuffer, highResBuffer, highResBuffer);
+	// 【内层结界】：高清图的 Buffer (稍微外扩一点点，防边缘穿帮)
+	double highResBuffer = 50.0;
+	QRectF highResRect = visibleSceneRect.adjusted(-highResBuffer, -highResBuffer, highResBuffer, highResBuffer);
 
-    // 【外层结界】：缩略图的“雷达预警区” (向外狂扩 1.5 个屏幕的宽度！)
-    // 这意味着用户还没滚到那里，提前 1.5 个屏幕的缩略图就已经在后台悄悄解压了
-    double prefetchX = visibleSceneRect.width() * 1.5;
-    double prefetchY = visibleSceneRect.height() * 1.5;
-    QRectF prefetchRect = visibleSceneRect.adjusted(-prefetchX, -prefetchY, prefetchX, prefetchY);
+	// 【外层结界】：缩略图的“雷达预警区” (向外狂扩 1.5 个屏幕的宽度！)
+	// 这意味着用户还没滚到那里，提前 1.5 个屏幕的缩略图就已经在后台悄悄解压了
+	double prefetchX = visibleSceneRect.width() * 1.5;
+	double prefetchY = visibleSceneRect.height() * 1.5;
+	QRectF prefetchRect = visibleSceneRect.adjusted(-prefetchX, -prefetchY, prefetchX, prefetchY);
 
-    m_currentScale = transform().m11();
+	m_currentScale = transform().m11();
 
-    // 2. 遍历大管家：统一调度所有 Item 的生死与预加载
-    for (auto item : m_items) {
+	// 2. 遍历大管家：统一调度所有 Item 的生死与预加载
+	for (auto item : m_items) {
 
-        // --- 🟢 A. 缩略图雷达预加载逻辑 ---
-        QRectF itemRect = item->sceneBoundingRect();
+		// --- 🟢 A. 缩略图雷达预加载逻辑 ---
+		QRectF itemRect = item->sceneBoundingRect();
 
-        if (prefetchRect.intersects(itemRect)) {
-            // 只要进入雷达区，立刻发起异步请求！
-            item->ensureThumbnailRequested();
-        }
-        else {
-            // 如果连雷达区都跌出去了，立刻销毁缩略图，严控内存！
-            item->releaseThumbnail();
-        }
-
-        // --- 🟢 B. 高清图 LOD 降级逻辑 ---
-        // 高清图绝不能用 prefetchRect，必须用极其克制的 highResRect
-        item->updateVisibleTiles(highResRect, m_currentScale, m_lodThresholdMultiplier);
-    }
+		if (prefetchRect.intersects(itemRect)) {
+			// 只要进入雷达区，立刻发起异步请求！
+			item->ensureThumbnailRequested();
+		}
+		else {
+			// 如果连雷达区都跌出去了，立刻销毁缩略图，严控内存！
+			item->releaseThumbnail();
+		}
+		if (m_isFastScrolling) {
+			item->unloadAll();
+		}
+		else
+		{
+			// --- 🟢 B. 高清图 LOD 降级逻辑 ---
+			// 高清图绝不能用 prefetchRect，必须用极其克制的 highResRect
+			item->updateVisibleTiles(highResRect, m_currentScale, m_lodThresholdMultiplier);
+		} 
+	}
+	viewport()->update();
 }
 
 void TiledGraphicsView::undoLastDrawPoint()
@@ -768,152 +898,6 @@ void TiledGraphicsView::cancelCurrentDrawing()
     if (m_currentMode == Mode_Draw && m_currentTool) {
         m_currentTool->cancelDrawing();
     }
-}
-//TODO 新增功能 20260310 增加图像导出功能，
-QPixmap TiledGraphicsView::exportRegionData(const QRectF& sceneRect, ExportQuality quality, bool drawDefects)
-{
-    if (sceneRect.isEmpty() || m_items.isEmpty()) return QPixmap();
-
-    QSize targetSize(qCeil(sceneRect.width()), qCeil(sceneRect.height()));
-    if (targetSize.width() > 16384 || targetSize.height() > 16384) {
-        qWarning() << QString::fromLocal8Bit("⚠️ 截取区域过大，已自动等比缩小！");
-        targetSize.scale(16384, 16384, Qt::KeepAspectRatio);
-    }
-
-   // QImage resultImage(targetSize, QImage::Format_ARGB32_Premultiplied);
-    QImage resultImage(targetSize, QImage::Format_RGB888); 
-    resultImage.fill(Qt::white);
-
-    QPainter painter(&resultImage);
-    painter.setRenderHint(QPainter::Antialiasing, false);
-    painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
-     
-    painter.setWindow(sceneRect.toRect());
-    painter.setViewport(resultImage.rect());
-
-    for (TunnelSectionItem* item : m_items) {
-        QRectF itemRect = item->sceneBoundingRect();
-        if (!sceneRect.intersects(itemRect)) continue;
-
-
-        // 🟢 强转为数据库数据源，以调用我们新增的特有接口
-        
-        AbstractTileSource* source = item->getSource();
-
-        if (quality == Export_Thumbnail) {
-           /* QImage thumb = source->getThumbnailImage();
-            if (!thumb.isNull()) { 
-                painter.drawImage(itemRect, thumb);
-            }*/
-        }
-        else {
-            int tSize = item->getTileSize();
-            QRectF localIntersect = item->mapRectFromScene(sceneRect.intersected(itemRect));
-
-            int startCol = qMax(0, qFloor(localIntersect.left() / tSize));
-            int endCol = qFloor(localIntersect.right() / tSize);
-            int startRow = qMax(0, qFloor(localIntersect.top() / tSize));
-            int endRow = qFloor(localIntersect.bottom() / tSize);
-
-            // =========================================================
-            // 💥 核心直连数据库导出逻辑：无需网络异步请求，直接本地暴力查库
-            // =========================================================
-            QString connName = QUuid::createUuid().toString();
-            {
-                QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
-                db.setDatabaseName(source->getDbPath());
-                db.setConnectOptions("QSQLITE_OPEN_READONLY");
-
-                if (db.open()) {
-                    QSqlQuery query(db);
-                    // 准备好查询语句，下面直接绑坐标，速度极快
-                    query.prepare("SELECT data FROM tiles WHERE col = ? AND row = ?");
-
-                    for (int r = startRow; r <= endRow; ++r) {
-                        for (int c = startCol; c <= endCol; ++c) {
-
-                            query.bindValue(0, c);
-                            query.bindValue(1, r);
-
-                            // 如果查到了这条数据
-                            if (query.exec() && query.next()) {
-                                QByteArray imgData = query.value(0).toByteArray();
-                                // 内存解码
-                                QImage tile = QImage::fromData(imgData, "JPG");
-                                if (tile.isNull()) continue;
-
-                                QRectF tileSceneRect(
-                                    itemRect.x() + c * tSize,
-                                    itemRect.y() + r * tSize,
-                                    tile.width(),
-                                    tile.height()
-                                );
-                                painter.drawImage(tileSceneRect, tile);
-                            }
-                        }
-                    }
-                }
-                else {
-                    qWarning() << "导出失败：无法打开数据库" << source->getDbPath();
-                }
-            }
-            QSqlDatabase::removeDatabase(connName);
-        }
-    }
-
-    // =========================================================
-    // 绘制矢量病害层
-    // =========================================================
-    if (drawDefects) {
-        painter.setRenderHint(QPainter::Antialiasing, true);
-        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-
-        // 1. 隐藏隧道底图
-        for (TunnelSectionItem* item : m_items) {
-            item->hide();
-        }
-
-        // 💥 2. 核心修复：临时抽走 Scene 的“黑背景”，防止它覆盖我们拼好的图片！
-        QBrush oldBgBrush = m_scene->backgroundBrush();
-        m_scene->setBackgroundBrush(Qt::NoBrush);
-
-        // 3. 充当翻译官：统一两边的坐标系
-        painter.setWindow(0, 0, targetSize.width(), targetSize.height());
-        painter.setViewport(resultImage.rect());
-
-        // 4. 画病害！此时因为背景是 NoBrush，病害会直接以透明底盖在我们的图片上
-        m_scene->render(&painter, resultImage.rect(), sceneRect);
-
-        // 💥 5. 打扫战场：把背景色和底图全还给界面，做到神不知鬼不觉
-        m_scene->setBackgroundBrush(oldBgBrush);
-        for (TunnelSectionItem* item : m_items) {
-            item->show();
-        }
-    }
-
-    painter.end();
-    return QPixmap::fromImage(resultImage);
-}
-
-void TiledGraphicsView::updateHUD()
-{
-    int loadedTiles = 0;
-    for (auto item : m_items) {
-        loadedTiles += item->getLoadedTileCount();
-    }
-
-    bool isHighResMode = (loadedTiles > 0);
-    QString quality = isHighResMode ? QString::fromLocal8Bit("高清") : QString::fromLocal8Bit("预览");
-
-    // 注意：抽离出来后没法算耗时(elapsed)了，因为这是异步的零碎刷新
-    // 我们可以把耗时固定写0，或者直接从字符串里删掉耗时显示
-    QString stats = QString::fromLocal8Bit(
-        "绘制模式: %1 | 切片: %2 | 缩放: %3% | 画质: %4 | LOD系数: %5"
-    ).arg(DrawModelStr).arg(loadedTiles)
-        .arg(m_currentScale * 100, 0, 'f', 0).arg(quality)
-        .arg(m_lodThresholdMultiplier, 0, 'f', 2);
-
-    emit sigStatsUpdated(stats);
 }
 
  
@@ -937,114 +921,80 @@ double TiledGraphicsView::getFitScale() const
         return (double)viewSize.width() / itemsRect.width();
     }
 }
- 
+
 QList<QGraphicsItem*> TiledGraphicsView::getVisualItems(QPoint viewPos)
 {
-    // 1. 获取设备像素比
-    qreal ratio = viewport()->devicePixelRatio();
+	// 🟢 1. 获取设备像素比 (关键修改)
+	// 如果宿主程序没开缩放，高分屏下这里会返回 1.25, 1.5, 2.0 等
+	// 如果开了缩放，或者普通屏，这里通常是 1.0
+	qreal ratio = viewport()->devicePixelRatio();
 
-    // 2. 设定极致手感容差：8 像素的屏幕吸附半径
-    int baseTolerance = 8;
-    int finalTolerance = static_cast<int>(baseTolerance * ratio);
+	// 2. 设定基础容差 (逻辑像素)
+	int baseTolerance = 5;
 
-    // 3. 获取鼠标在物理世界的绝对坐标
-    QPointF scenePos = mapToScene(viewPos);
+	// 缩放很小时（上帝视角），线条很细，很难点中，所以要大幅扩大容差
+	if (m_currentScale < 0.2) {
+		baseTolerance = 10;
+	}
 
-    // ==========================================
-    // 💥 核心魔法 1：动态物理探测结界！
-    // 将屏幕像素的容差，换算成物理世界的真实容差范围！
-    // 比如在缩放比例为 0.1 时，屏幕上的 8 个像素，会自动膨胀成物理世界的 80 个单位！
-    // ==========================================
-    double sceneTolerance = finalTolerance / qMax(0.0001, m_currentScale);
+	// 🟢 3. 计算最终容差
+	// 这样无论在什么屏幕上，物理点击面积都是差不多大的，手感一致
+	int finalTolerance = static_cast<int>(baseTolerance * ratio);
 
-    // 在物理世界构造一个“圆形探测器”
-    QPainterPath detectorPath;
-    detectorPath.addEllipse(scenePos, sceneTolerance, sceneTolerance);
+	// 4. 构造点击矩形
+	QRect viewRect(
+		viewPos.x() - finalTolerance,
+		viewPos.y() - finalTolerance,
+		finalTolerance * 2,
+		finalTolerance * 2
+	);
 
-    // ==========================================
-    // 粗筛：利用包围盒快速捞出嫌疑对象 (按 Z 值从上到下排序)
-    // ==========================================
-    QRectF searchRect = detectorPath.boundingRect();
-    QList<QGraphicsItem*> suspects = m_scene->items(searchRect, Qt::IntersectsItemBoundingRect);
-
-    QList<QGraphicsItem*> hitItems;
-
-    for (QGraphicsItem* item : suspects) {
-        if (DefectShapeItem* defect = dynamic_cast<DefectShapeItem*>(item)) {
-
-            // 将探测器转换到病害的局部坐标系中
-            QTransform inverse = defect->sceneTransform().inverted();
-            QPainterPath localDetector = inverse.map(detectorPath);
-
-            QPainterPath defectPath = defect->path();
-            bool isHit = false;
-
-            // ==========================================
-            // 💥 核心魔法 2：抢救“奇点”病害 (1个点)
-            // 因为单个点没有面积也没有长度，常规碰撞会全部失效！
-            // 必须单独判断这个点是否落入了我们的圆形探测器内！
-            // ==========================================
-            if (defectPath.elementCount() > 0) {
-                QPointF firstPt(defectPath.elementAt(0).x, defectPath.elementAt(0).y);
-                if (localDetector.contains(firstPt)) {
-                    isHit = true;
-                }
-            }
-
-            // ==========================================
-            // 💥 核心魔法 3：抢救线状/面状病害 (2个点及以上)
-            // 哪怕它是 0 宽度的数学线，只要穿过了探测器圆面，立刻判定命中！
-            // ==========================================
-            if (!isHit && defectPath.intersects(localDetector)) {
-                isHit = true;
-            }
-
-            if (isHit) {
-                hitItems.append(item);
-            }
-        }
-        else {
-            // 底图等常规大尺寸非病害图元，直接加进来兜底
-            hitItems.append(item);
-        }
-    }
-
-    return hitItems;
+	return m_scene->items(mapToScene(viewRect));
 }
 
-
  
+
+void TiledGraphicsView::setDrawingGeometry(DrawShape shapeType)
+{
+	if (m_curDrawShape != shapeType)
+	{
+		m_curDrawShape = shapeType;
+		startDrawingDefect(shapeType);
+	}
+
+}
 
 void TiledGraphicsView::startDrawingDefect(DrawShape shapeType)
 {
-    // 切换到绘图模式
-    m_currentMode = Mode_Draw;
+	// 切换到绘图模式
+	m_currentMode = Mode_Draw;
 
-    if (m_currentTool) {
-        m_currentTool->deactivate();
-        //delete m_currentTool;
-    }
-    m_currentTool-> ChangeShpeType(shapeType);
-    setDragMode(QGraphicsView::NoDrag);
-    setCursor(Qt::CrossCursor);
+	if (m_currentTool) {
+		m_currentTool->deactivate();
+	//delete m_currentTool;
+	}
 
-   
+	m_currentTool->ChangeShapeType(shapeType);
+	setDragMode(QGraphicsView::NoDrag);
+	setCursor(Qt::CrossCursor);
 
-    // ==========================================
-    // 🟢 修复点：动态更新左上角提示文字
-    // ==========================================
-    if (shapeType == Shape_Point) {
-        DrawModelStr = QString::fromLocal8Bit("绘图模式 [点]");
-    }
-    else if (shapeType == Shape_Line) {
-        DrawModelStr = QString::fromLocal8Bit("绘图模式 [线]");
-    }
-    else if (shapeType == Shape_Polygon) {
-        DrawModelStr = QString::fromLocal8Bit("绘图模式 [面]");
-    }
+	
 
-    // 🟢 强制触发一次可见性更新，立刻刷新左上角的 HUD 文字
-    updateVisibleTiles();
+	// ==========================================
+	// 🟢 修复点：动态更新左上角提示文字
+	// ==========================================
+	if (shapeType == Shape_Point) {
+		DrawModelStr = QString::fromLocal8Bit("绘图模式 [点]");
+	}
+	else if (shapeType == Shape_Line) {
+		DrawModelStr = QString::fromLocal8Bit("绘图模式 [线]");
+	}
+	else if (shapeType == Shape_Polygon) {
+		DrawModelStr = QString::fromLocal8Bit("绘图模式 [面]");
+	}
+
+	// 🟢 强制触发一次可见性更新，立刻刷新左上角的 HUD 文字
+	updateVisibleTiles();
 }
 
 void TiledGraphicsView::setLodLevel(int level) {
@@ -1067,4 +1017,634 @@ void TiledGraphicsView::setLodLevel(int level) {
     updateVisibleTiles();
 }
 
- 
+
+
+bool TiledGraphicsView::GlobalSceneToMap(QPointF pt, QString & imageName, int& localX, int& localY)
+{
+	// 🟢直接问 Scene 谁在这个点上，不用自己遍历 list
+	// items() 返回的是 Z 值从上到下的列表，第一个通常就是最上面的
+	QList<QGraphicsItem*> items = m_scene->items(pt);
+
+	TunnelSectionItem* hoverItem = nullptr;
+	for (auto item : items) {
+		// 使用 dynamic_cast 确认是不是我们要找的切片层
+		hoverItem = dynamic_cast<TunnelSectionItem*>(item);
+		if (hoverItem) break;
+	}
+
+	if (hoverItem)
+	{
+		// 3. 发送坐标信号给外部 HUD
+		QPointF localPos = hoverItem->mapFromScene(pt);
+
+		//imageName = QFileInfo(hoverItem->getImageName()).completeBaseName();
+	//	QString nameTemp =     QFileInfo (hoverItem->getImageName()).baseName();
+
+	//	int index = nameTemp.lastIndexOf(".");
+		//imageName = nameTemp.mid(0, index);
+		imageName = hoverItem->getImageName();
+		localX = localPos.x();
+		localY = localPos.y();
+
+		return true;
+	}
+
+	return false;
+}
+
+void TiledGraphicsView::setHighLightElement(int uuid, ElementType ele)
+{
+
+	switch (ele)
+	{
+	case Type_Cp3:
+	{
+
+		break;
+	}
+	case Type_Chain:
+	{
+
+		break;
+	}
+	case Type_Disease:
+	{
+		DefectShapeItem * item = m_defectManager->getItemUseId(uuid);
+
+		if (item == NULL)
+		{
+			return;
+		}
+
+		QRectF sceneRect = item->sceneBoundingRect();
+		qreal margin = 1.85;
+
+		QRectF targetRect(0, 0, sceneRect.width()* margin, sceneRect.height()* margin);
+		targetRect.moveCenter(sceneRect.center());
+
+		// 确保图像不失心变形
+		fitInView(targetRect, Qt::KeepAspectRatio);
+
+		item->setSelected(true);
+
+		break;
+	}
+	case Type_Ring:
+	{
+
+		break;
+	}
+	case Type_Section:
+	{
+
+		break;
+	}
+	case Type_Platform:
+	{
+
+		break;
+	}
+	default:
+		break;
+	}
+
+	updateVisibleTiles();      
+}
+
+void TiledGraphicsView::mouseDoubleClickEvent(QMouseEvent * event)
+{
+	if (event->button() == Qt::LeftButton)
+	{
+		if (event->button() == Qt::MouseEventCreatedDoubleClick)
+		{
+			// 获取鼠标下的物体
+			QList<QGraphicsItem*> items = getVisualItems(event->pos());
+
+			emit sigDoubleClickedLeft(mapToScene(event->pos()), items);
+		}
+
+	}
+}
+
+//TODO 新增功能 20260310 增加图像导出功能，
+QPixmap TiledGraphicsView::exportRegionData(const QRectF& sceneRect, ExportQuality quality, bool drawDefects)
+{
+	if (sceneRect.isEmpty() || m_items.isEmpty()) return QPixmap();
+
+	QSize targetSize(qCeil(sceneRect.width()), qCeil(sceneRect.height()));
+	/*if (targetSize.width() > 16384 || targetSize.height() > 16384) {
+		qWarning() << QString::fromLocal8Bit("⚠️ 截取区域过大，已自动等比缩小！"); 
+		targetSize.scale(16384, 16384, Qt::KeepAspectRatio);
+	}*/ 
+	//QImage resultImage(targetSize, QImage::Format_ARGB32_Premultiplied);
+	QImage resultImage(targetSize, QImage::Format_RGB888); 
+	resultImage.fill(Qt::white);
+
+	QPainter painter(&resultImage);
+	painter.setRenderHint(QPainter::Antialiasing,false);
+	painter.setRenderHint(QPainter::SmoothPixmapTransform,false);
+	 
+	painter.setWindow(sceneRect.toRect());
+	painter.setViewport(resultImage.rect());
+
+	for (TunnelSectionItem* item : m_items) {
+		QRectF itemRect = item->sceneBoundingRect();
+		if (!sceneRect.intersects(itemRect)) continue; 
+		AbstractTileSource* source = item->getSource();
+
+		if (quality == Export_Thumbnail) {
+			QImage thumb(source->getThumbnailImage());
+			if (!thumb.isNull()) { 
+				painter.drawImage(itemRect, thumb);
+			}
+		}
+		else {
+			int tSize = item->getTileSize();
+			QRectF localIntersect = item->mapRectFromScene(sceneRect.intersected(itemRect)); 
+			int startCol = qMax(0, qFloor(localIntersect.left() / tSize));
+			int endCol = qFloor(localIntersect.right() / tSize);
+			int startRow = qMax(0, qFloor(localIntersect.top() / tSize));
+			int endRow = qFloor(localIntersect.bottom() / tSize);
+
+
+			const QList<TileImageData> tiles = source->tileDataRange(startCol, endCol, startRow, endRow);
+			for (const TileImageData& tileData : tiles) {
+				QImage tile = QImage::fromData(tileData.data, "JPG");
+				if (tile.isNull()) continue;
+
+				QRectF tileSceneRect(
+					itemRect.x() + tileData.col * tSize,
+					itemRect.y() + tileData.row * tSize,
+					tile.width(),
+					tile.height()
+				);
+				painter.drawImage(tileSceneRect, tile);
+			}
+		}
+	}
+
+	// =========================================================
+	// 绘制矢量病害层
+	// =========================================================
+	if (drawDefects) {
+		painter.setRenderHint(QPainter::Antialiasing);
+		painter.setRenderHint(QPainter::SmoothPixmapTransform);
+		// 1. 隐藏隧道底图
+		for (TunnelSectionItem* item : m_items) {
+			item->hide();
+		}
+
+		// 💥 2. 核心修复：临时抽走 Scene 的“黑背景”，防止它覆盖我们拼好的图片！
+		QBrush oldBgBrush = m_scene->backgroundBrush();
+		m_scene->setBackgroundBrush(Qt::NoBrush);
+
+		// 3. 充当翻译官：统一两边的坐标系
+		painter.setWindow(0, 0, targetSize.width(), targetSize.height());
+		painter.setViewport(resultImage.rect());
+
+		// 4. 画病害！此时因为背景是 NoBrush，病害会直接以透明底盖在我们的图片上
+		m_scene->render(&painter, resultImage.rect(), sceneRect);
+
+		// 💥 5. 打扫战场：把背景色和底图全还给界面，做到神不知鬼不觉
+		m_scene->setBackgroundBrush(oldBgBrush);
+		for (TunnelSectionItem* item : m_items) {
+			item->show();
+		}
+	}
+
+	painter.end();
+	return QPixmap::fromImage(resultImage);
+}
+
+
+
+
+
+//TODO 新增功能 增加图像导出功能，返回 cv::Mat 灰度图格式 (极速单通道零拷贝版)
+cv::Mat TiledGraphicsView::exportRegionGrayMat(const QRectF& sceneRect, ExportQuality quality, bool drawDefects)
+{
+	if (sceneRect.isEmpty() || m_items.isEmpty()) return cv::Mat();
+
+	QSize targetSize(qCeil(sceneRect.width()), qCeil(sceneRect.height()));
+	//if (targetSize.width() > 16384 || targetSize.height() > 16384) {
+	//	qWarning() << QString::fromLocal8Bit("⚠️ 截取区域过大，已自动等比缩小！");
+	//	targetSize.scale(16384, 16384, Qt::KeepAspectRatio);
+	//}
+
+	QImage resultImage(targetSize, QImage::Format_Grayscale8);
+	resultImage.fill(Qt::white);
+
+	QPainter painter(&resultImage);
+	painter.setRenderHint(QPainter::Antialiasing, false);
+	painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+
+	painter.setWindow(sceneRect.toRect());
+	painter.setViewport(resultImage.rect());
+
+	for (TunnelSectionItem* item : m_items) {
+		QRectF itemRect = item->sceneBoundingRect();
+		if (!sceneRect.intersects(itemRect)) continue;
+
+		AbstractTileSource* source = item->getSource();
+
+		if (quality == Export_Thumbnail) {
+			// 缩略图逻辑（按需放开）
+		}
+		else {
+			int tSize = item->getTileSize();
+			QRectF localIntersect = item->mapRectFromScene(sceneRect.intersected(itemRect));
+
+			int startCol = qMax(0, qFloor(localIntersect.left() / tSize));
+			int endCol = qFloor(localIntersect.right() / tSize);
+			int startRow = qMax(0, qFloor(localIntersect.top() / tSize));
+			int endRow = qFloor(localIntersect.bottom() / tSize);
+
+			const QList<TileImageData> tiles = source->tileDataRange(startCol, endCol, startRow, endRow);
+			for (const TileImageData& tileData : tiles) {
+				QImage tile = QImage::fromData(tileData.data, "JPG");
+				if (tile.isNull()) continue;
+
+				QRectF tileSceneRect(
+					itemRect.x() + tileData.col * tSize,
+					itemRect.y() + tileData.row * tSize,
+					tile.width(),
+					tile.height()
+				);
+				painter.drawImage(tileSceneRect, tile);
+			}
+		}
+	}
+
+	// 绘制矢量病害层
+	if (drawDefects) {
+		painter.setRenderHint(QPainter::Antialiasing, true);
+		painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+
+		for (TunnelSectionItem* item : m_items) {
+			item->hide();
+		}
+
+		QBrush oldBgBrush = m_scene->backgroundBrush();
+		m_scene->setBackgroundBrush(Qt::NoBrush);
+
+		painter.setWindow(0, 0, targetSize.width(), targetSize.height());
+		painter.setViewport(resultImage.rect());
+
+		// 💥 这里哪怕你界面上画的是大红大黄的线段，最终砸进 finalMat 也会自动变成灰阶线段
+		m_scene->render(&painter, resultImage.rect(), sceneRect);
+
+		m_scene->setBackgroundBrush(oldBgBrush);
+		for (TunnelSectionItem* item : m_items) {
+			item->show();
+		}
+	}
+
+	painter.end();
+
+	cv::Mat finalMat(resultImage.height(),
+		resultImage.width(),
+		CV_8UC1,
+		resultImage.bits(),
+		resultImage.bytesPerLine());
+	return finalMat.clone();
+}
+
+
+cv::Mat TiledGraphicsView::exportRegionMat(const QRectF& sceneRect,
+	ExportQuality quality,
+	bool drawDefects,
+	bool returnBgr)
+{
+	if (sceneRect.isEmpty() || m_items.isEmpty()) {
+		return cv::Mat();
+	}
+
+	QSize targetSize(qCeil(sceneRect.width()), qCeil(sceneRect.height()));
+	if (targetSize.width() <= 0 || targetSize.height() <= 0) {
+		return cv::Mat();
+	}
+
+	//if (targetSize.width() > 16384 || targetSize.height() > 16384) {
+	//	qWarning() << QString::fromLocal8Bit("⚠️ 截取区域过大，已自动等比缩小！");
+	//	targetSize.scale(16384, 16384, Qt::KeepAspectRatio);
+	//}
+
+	QImage resultImage(targetSize, QImage::Format_RGB888);
+	resultImage.fill(Qt::white);
+
+	QPainter painter(&resultImage);
+	painter.setRenderHint(QPainter::Antialiasing, false);
+	painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+
+	painter.setWindow(sceneRect.toRect());
+	painter.setViewport(resultImage.rect());
+
+	for (TunnelSectionItem* item : m_items) {
+		QRectF itemRect = item->sceneBoundingRect();
+		if (!sceneRect.intersects(itemRect)) {
+			continue;
+		}
+
+		AbstractTileSource* source = item->getSource();
+		if (!source) {
+			continue;
+		}
+
+		if (quality == Export_Thumbnail) {
+			// 你当前原函数里缩略图逻辑也是注释掉的，这里先保持一致
+			continue;
+		}
+
+		int tSize = item->getTileSize();
+		QRectF localIntersect = item->mapRectFromScene(sceneRect.intersected(itemRect));
+
+		int startCol = qMax(0, qFloor(localIntersect.left() / tSize));
+		int endCol = qFloor(localIntersect.right() / tSize);
+		int startRow = qMax(0, qFloor(localIntersect.top() / tSize));
+		int endRow = qFloor(localIntersect.bottom() / tSize);
+
+		const QList<TileImageData> tiles = source->tileDataRange(startCol, endCol, startRow, endRow);
+		for (const TileImageData& tileData : tiles) {
+			QImage tile = QImage::fromData(tileData.data, "JPG");
+			if (tile.isNull()) {
+				continue;
+			}
+
+			if (tile.format() != QImage::Format_RGB888) {
+				tile = tile.convertToFormat(QImage::Format_RGB888);
+			}
+
+			QRectF tileSceneRect(
+				itemRect.x() + tileData.col * tSize,
+				itemRect.y() + tileData.row * tSize,
+				tile.width(),
+				tile.height()
+			);
+
+			painter.drawImage(tileSceneRect, tile);
+		}
+	}
+
+	// =========================================================
+	// 绘制矢量病害层
+	// 这里仍然是画到 resultImage，但 resultImage 背后就是 matRgb.data
+	// =========================================================
+	if (drawDefects) {
+		painter.setRenderHint(QPainter::Antialiasing, true);
+		painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+
+		for (TunnelSectionItem* item : m_items) {
+			item->hide();
+		}
+
+		QBrush oldBgBrush = m_scene->backgroundBrush();
+		m_scene->setBackgroundBrush(Qt::NoBrush);
+
+		painter.setWindow(0, 0, targetSize.width(), targetSize.height());
+		painter.setViewport(resultImage.rect());
+
+		m_scene->render(&painter, resultImage.rect(), sceneRect);
+
+		m_scene->setBackgroundBrush(oldBgBrush);
+
+		for (TunnelSectionItem* item : m_items) {
+			item->show();
+		}
+	}
+
+	painter.end();
+
+	cv::Mat matRgb(resultImage.height(),
+		resultImage.width(),
+		CV_8UC3,
+		resultImage.bits(),
+		resultImage.bytesPerLine());
+
+	// 如果后续还要 Qt 显示、或者你只是转灰度识别，可以直接 return matRgb，最快
+	if (!returnBgr) {
+		return matRgb.clone();
+	}
+
+	// OpenCV 的 imwrite / 大多数算法默认按 BGR 解释彩色图
+	// 需要保存正常颜色时，再转 BGR
+	cv::Mat matBgr;
+	cv::cvtColor(matRgb, matBgr, cv::COLOR_RGB2BGR);
+	return matBgr;
+}
+
+
+QPixmap TiledGraphicsView::exportRegionDataToWord(const QRectF& sceneRect, ExportQuality quality /*= Export_HighRes*/, bool drawDefects /*= true*/)
+{
+	if (sceneRect.isEmpty() || m_items.isEmpty()) return QPixmap();
+
+	QSize targetSize(qCeil(sceneRect.width()), qCeil(sceneRect.height()));
+	/*if (targetSize.width() > 16384 || targetSize.height() > 16384) {
+	qWarning() << QString::fromLocal8Bit("⚠️ 截取区域过大，已自动等比缩小！");
+	targetSize.scale(16384, 16384, Qt::KeepAspectRatio);
+	}*/
+
+	//QImage resultImage(targetSize, QImage::Format_ARGB32_Premultiplied);
+	QImage resultImage(targetSize, QImage::Format_RGB888);
+
+	// 💥 修复点 1：JPG不支持透明底，一律填成干净的白色 (或你需要的底图颜色)
+	resultImage.fill(Qt::white);
+
+	QPainter painter(&resultImage);
+	painter.setRenderHint(QPainter::Antialiasing, false);
+	painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+
+	// 💥 修复点 2：上帝级坐标系映射！
+	// 告诉画家：“你现在的画板代表的是真实的物理 SceneRect”
+	painter.setWindow(sceneRect.toRect());
+	painter.setViewport(resultImage.rect());
+
+	for (TunnelSectionItem* item : m_items) {
+		QRectF itemRect = item->sceneBoundingRect();
+		if (!sceneRect.intersects(itemRect)) continue;
+
+		AbstractTileSource* source = item->getSource();
+
+		if (quality == Export_Thumbnail) {
+			/*	QImage thumb = source->getThumbnailImage();
+				if (!thumb.isNull()) {
+					painter.drawImage(itemRect, thumb);
+				}*/
+		}
+		else {
+			int tSize = item->getTileSize();
+			QRectF localIntersect = item->mapRectFromScene(sceneRect.intersected(itemRect));
+
+			int startCol = qMax(0, qFloor(localIntersect.left() / tSize));
+			int endCol = qFloor(localIntersect.right() / tSize);
+			int startRow = qMax(0, qFloor(localIntersect.top() / tSize));
+			int endRow = qFloor(localIntersect.bottom() / tSize);
+
+			const QList<TileImageData> tiles = source->tileDataRange(startCol, endCol, startRow, endRow);
+			for (const TileImageData& tileData : tiles) {
+				QImage tile = QImage::fromData(tileData.data, "JPG");
+				if (tile.isNull()) continue;
+
+				QRectF tileSceneRect(
+					itemRect.x() + tileData.col * tSize,
+					itemRect.y() + tileData.row * tSize,
+					tile.width(),
+					tile.height()
+				);
+				painter.drawImage(tileSceneRect, tile);
+			}
+		}
+	}
+
+	// =========================================================
+	// 绘制矢量病害层
+	// =========================================================
+	if (drawDefects) {
+		painter.setRenderHint(QPainter::Antialiasing);
+		painter.setRenderHint(QPainter::SmoothPixmapTransform);
+		// 1. 隐藏隧道底图
+		for (TunnelSectionItem* item : m_items) {
+			item->hide();
+		}
+
+		// 💥 2. 核心修复：临时抽走 Scene 的“黑背景”，防止它覆盖我们拼好的图片！
+		QBrush oldBgBrush = m_scene->backgroundBrush();
+		m_scene->setBackgroundBrush(Qt::NoBrush);
+
+		// 3. 充当翻译官：统一两边的坐标系
+		painter.setWindow(0, 0, targetSize.width(), targetSize.height());
+		painter.setViewport(resultImage.rect());
+
+		// 4. 画病害！此时因为背景是 NoBrush，病害会直接以透明底盖在我们的图片上
+		m_scene->render(&painter, resultImage.rect(), sceneRect);
+
+		// 💥 5. 打扫战场：把背景色和底图全还给界面，做到神不知鬼不觉
+		m_scene->setBackgroundBrush(oldBgBrush);
+		for (TunnelSectionItem* item : m_items) {
+			item->show();
+		}
+	}
+
+	painter.end();
+
+	if (resultImage.width()>1500)
+	{
+		resultImage = resultImage.scaledToWidth(1500, Qt::SmoothTransformation);
+	}
+	return QPixmap::fromImage(resultImage);
+}
+
+// 指定某图片名获取该Mat指针
+cv::Mat TiledGraphicsView::getMatByImageName(QString qstrImageName)
+{
+	QString qstrFloderPath;
+	QString qstrFindName = qstrImageName.remove(".jpg");
+	for (TunnelSectionItem* item : m_items)
+	{
+		if (item->getSource()->oriImageName() == qstrFindName)
+		{
+			qstrFloderPath = item->getSource()->getDbPath();
+			break;
+		}
+	}
+
+
+	// 获取所有X_X.jpg文件
+	QDir dir(qstrFloderPath);
+	if (!dir.exists())
+	{
+		return cv::Mat();
+	}
+
+	QFileInfoList fileList = dir.entryInfoList(QStringList() << "*.jpg", QDir::Files | QDir::NoSymLinks, QDir::NoSort);
+
+	// 每列一个数组
+	vector<vector<pair<QString,QString>>> vecVecColsImages;
+	// 21680宽度是固定的
+	vecVecColsImages.resize(22);
+	for (const QFileInfo& fileInfo : fileList)
+	{
+		QString qstrFileName = fileInfo.fileName();
+		qstrFileName = qstrFileName.remove(".jpg");
+		QString absoluPath = fileInfo.absoluteFilePath();
+
+		if (qstrFileName.contains("_"))
+		{
+			QStringList qstrList = qstrFileName.split("_");
+			if (qstrList.size()==0)
+			{
+				continue;
+			}
+			bool isOk = false;
+			int nIndex = qstrList[0].toInt(&isOk);
+			if (isOk && nIndex < vecVecColsImages.size())
+			{
+				vecVecColsImages[nIndex].push_back({ qstrFileName, absoluPath });
+			}
+		}
+	}
+
+	// 排序
+	for (size_t i = 0; i < vecVecColsImages.size(); i++)
+	{
+		sort(vecVecColsImages[i].begin(), vecVecColsImages[i].end(), [](pair<QString, QString>& a, pair<QString, QString>&b)
+		{
+			return  a.first.split("_")[1].toInt() < b.first.split("_")[1].toInt();
+		});
+	}
+
+
+	vector<cv::Mat> vecVconcatMat;
+	// 先按列读取
+	for (size_t i = 0; i < vecVecColsImages.size(); i++)
+	{
+		vector<cv::Mat> vecMats;
+		for (size_t j = 0; j < vecVecColsImages[i].size(); j++)
+		{
+			string strPath = vecVecColsImages[i][j].second.toLocal8Bit();
+			cv::Mat srcImg = cv::imread(strPath, cv::IMREAD_UNCHANGED);
+			vecVconcatMat.push_back(srcImg);
+		}
+		cv::Mat vconcatMat;
+		cv::vconcat(vecMats, vconcatMat);
+		vecVconcatMat.push_back(vconcatMat);
+	}
+
+	// 检查高度是否都一致
+	bool isSame = true;
+	for (int i = 1; i < vecVconcatMat.size(); i++)
+	{
+		if (vecVconcatMat[i].rows != vecVconcatMat[0].rows || vecVconcatMat[i].cols != vecVconcatMat[0].cols)
+		{
+			isSame = false;
+		}
+	}
+	if (!isSame)
+	{
+		return cv::Mat();
+	}
+
+	cv::Mat result;
+	cv::hconcat(vecVconcatMat, result);
+	return result;
+
+}
+
+double TiledGraphicsView::getImageHeight()
+{
+	if (m_items.size() > 0)
+	{
+		return (double)m_items[0]->boundingRect().height() - 10;
+	}
+
+	return 0.0;
+}
+
+double TiledGraphicsView::getImageWidth()
+{ 
+	if (m_items.size() > 0)
+	{ 
+		return (double)m_items[0]->boundingRect().width();
+	}
+
+	return 0.0;
+}

@@ -43,9 +43,9 @@ public:
      */
     TunnelSectionItem(AbstractTileSource * source , QGraphicsItem * parent = nullptr);
     ~TunnelSectionItem();
-     
+
+   
     QRectF boundingRect() const override;
-     
     void paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget) override;
 
     /**
@@ -65,16 +65,18 @@ public:
  
     QString getImageName() const;
 
+	// TODO 新增功能 20260310 为了让顶层导出引擎能直接去硬盘拿图，暴露出数据源和切片尺寸
+	AbstractTileSource* getSource() const { return m_source; }
+	int getTileSize() const { return m_tileSize; }
 
-    // TODO 新增功能 20260310 为了让顶层导出引擎能直接去硬盘拿图，暴露出数据源和切片尺寸
-    AbstractTileSource* getSource() const { return m_source; }
-    int getTileSize() const { return m_tileSize; }
+	
 
-    void  ensureThumbnailRequested();
-    void releaseThumbnail();
-    
+	// 场景外包围框
+	QRectF m_senceRect;
+	void  ensureThumbnailRequested();
+	void releaseThumbnail();
 signals:
-    void sigTilesUpdated();
+	void sigTilesUpdated();
 private:
 
   
@@ -87,23 +89,27 @@ private:
     // 执行切片加载任务
     void requestMissingTiles(int startCol, int endCol, int startRow, int endRow, QSet<TileKey>& neededKeys);
 
-   
-
-    // 执行内存清理 (移除不可见的切片)
-    void processGarbageCollection(int startCol, int endCol, int startRow, int endRow);
+    // 执行内存清理 (移除不可见的切片) 
+	void processGarbageCollection(int startCol,int endCol, int startRow,int endRow);
 
 
-   
-     
+ 
 private:
-    //单个隧道段允许在显存中驻留的最大高清切片数 (约645mb)
-    const  int MAX_LOADED_TILES = 500;
+	//====================================
+	//单个隧道段允许在显存中驻留的最大高清切片数  
+	//算法依据 切片1024*1024 （4mb/张）
+	//设定为400，单段最高占用约 1.6gb显存
+	//4K屏幕下 允许用户无限缩小至13%视口不降级
+	const  int MAX_LOADED_TILES = 200;
 
-    //瞬间向网盘发起的最大并发请求数
-    const  int MAX_CONCURRENT_REQUESTS = 50;
+	//瞬间向网盘发起的最大并发请求数
+	//理由：保护机房 机械硬盘的物理磁头，防止寻道风暴
+	//方式 SMB/NFS 网络协议队列拥堵
+	const  int MAX_CONCURRENT_REQUESTS = 50;
 
-    //垃圾回首时的视口保留圈数(0表示离开屏幕立即销毁)
-    const int GC_KEEP_MARGIN = 1;
+	//垃圾回首时的视口保留圈数(0表示离开屏幕立即销毁)
+	const int GC_KEEP_MARGIN = 1;
+
 
     AbstractTileSource* m_source; // 存储“合同”指针
     // --- 基础属性 ---
@@ -112,12 +118,9 @@ private:
     qreal m_height = 100;
     int m_tileSize = 1024;
     // --- 资源管理 ---
-    QPixmap m_thumbnail;                  // 低清缩略图 (仅在可见区附近保留)
+    QPixmap m_thumbnail;                  // 低清缩略图 (始终常驻内存)
     QHash<TileKey, QPixmap> m_loadedTiles;// 高清切片缓存 (动态加载/卸载)
-
-
-    
-    bool m_shouldKeepThumbnail = false;
+	  
     
     // 用于调试显示计算出的范围
     QRectF m_debugVisibleRect;
@@ -125,7 +128,10 @@ private:
     // Key: 图片路径, Value: 切片坐标 (TileKey)
     // 作用：收到图片时，查这个表就知道它该放在哪
     QHash<QString, TileKey> m_pendingPaths;
-    bool m_isThumbLoading = false;
+
+
+	bool m_isThumbLoading = false;
+	bool m_shouldKeepThumbnail = false;
 };
 
 #endif // TUNNELSECTIONITEM_H

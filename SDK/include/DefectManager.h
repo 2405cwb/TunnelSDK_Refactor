@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <QObject>
 #include <QGraphicsScene>
 #include "IDefectStorage.h"
@@ -33,7 +33,8 @@ public:
     // 批量注册上端同事传过来的病害配置表
     void registerDefectConfigs(const QList<DefectTypeConfig>& configs) {
         m_configs.clear();
-        for (const auto& cfg : configs) {
+		for (const auto& cfg : configs)
+		{
             m_configs[cfg.defectCode] = cfg;
         }
     }
@@ -41,16 +42,16 @@ public:
     // ==========================================
     // 🟢 获取指定几何形状对应的所有业务病害配置
     // ==========================================
-    QList<DefectTypeConfig> getConfigsByShape(DrawShape shapeType) const {
-        QList<DefectTypeConfig> result;
-        // 遍历整个字典
-        for (auto it = m_configs.begin(); it != m_configs.end(); ++it) {
-            if (it.value().defaultShape == shapeType) {
-                result.append(it.value());
-            }
-        }
-        return result;
-    }
+  //  QList<DefectTypeConfig> getConfigsByShape(DrawShape shapeType) const {
+  //      QList<DefectTypeConfig> result;
+  //      // 遍历整个字典
+		//for (auto it = m_configs.begin(); it != m_configs.end(); ++it) {
+		//	if (it.value().defaultShape == shapeType) {
+		//		result.append(it.value());
+		//	}
+		//}
+  //      return result;
+  //  }
 
 
     // 根据业务代码获取完整配置
@@ -59,7 +60,8 @@ public:
             return m_configs.value(defectCode);
         }
         // 兜底默认配置：黄色实线
-        return { 0, "未知病害", Shape_Line, QPen(Qt::yellow, 3, Qt::SolidLine), Qt::NoBrush };
+        //return { 0, "未知病害", Shape_Line, QPen(Qt::yellow, 3, Qt::SolidLine), Qt::NoBrush };
+		return{ 0, "未知病害", QPen(Qt::yellow, 3, Qt::SolidLine), Qt::NoBrush };
     }
 
  
@@ -81,29 +83,40 @@ public:
 
     // 🟢 参数 triggerSave：默认 true 表示用户画的，要保存；false 表示从文件读的，别保存！
     void addDefect(DefectShapeItem* item, bool triggerSave = true) {
-        // 从 Item 中读取它的业务代码
+       
+		if (m_items.contains(item->getUuid()))
+		{
+			return;
+		}
+		
+		// 从 Item 中读取它的业务代码
         int code = item->property("defectCode").toInt();
         // 查字典，获取这件衣服
         DefectTypeConfig cfg = getConfig(code);
         item->setPen(cfg.pen);
         item->setBrush(cfg.brush);
-        item->setToolTip(cfg.mark);
-        m_items.append(item);
+		setMoviesType(item);
+        //item->setToolTip(cfg.mark);
+        //m_items.append(item);
+		m_items.insert(item->getUuid(), item);
         m_scene->addItem(item);
     
 		//TODO 新增功能 20260227 增加病害移动功能：监听 Item 的位置变化信号，自动更新数据库
         connect(item, &DefectShapeItem::sigDefectMoved, this, [this](DefectShapeItem* movedItem) {
-            if (m_storage && !m_currentUri.isEmpty()) {
-                // 将被拖动的 Item 转成纯数据
-                DefectData data = movedItem->toData();
+          
+			emit sigDefectMoved(movedItem->toData());
 
-                // 💥 为什么这里调用 addOne？
-                // 因为我们在 SQLite 的 addOne 里写的是 "REPLACE INTO"
-                // 只要 UUID 没变，SQLite 会自动把旧位置的记录覆盖掉，实现无缝更新！
-                m_storage->addOne(data, m_currentUri);
+			//if (m_storage && !m_currentUri.isEmpty()) {
+   //             // 将被拖动的 Item 转成纯数据
+   //             DefectData data = movedItem->toData();
 
-                //qDebug() << QString::fromLocal8Bit(" 病害 [%1] 已被拖动，数据库自动更新完毕！").arg(data.name);
-            }
+   //             // 💥 为什么这里调用 addOne？
+   //             // 因为我们在 SQLite 的 addOne 里写的是 "REPLACE INTO"
+   //             // 只要 UUID 没变，SQLite 会自动把旧位置的记录覆盖掉，实现无缝更新！
+   //             m_storage->addOne(data, m_currentUri);
+
+   //             //qDebug() << QString::fromLocal8Bit(" 病害 [%1] 已被拖动，数据库自动更新完毕！").arg(data.name);
+   //         }
             });
 
         // 💥 只有用户手动新增的，才触发增量保存
@@ -114,7 +127,7 @@ public:
 
     void removeDefect(DefectShapeItem* item) {
         QString uuid = item->getUuid();
-        if (m_items.removeOne(item)) {
+        if (m_items.remove(item->getUuid())) {
             m_scene->removeItem(item);
             delete item;
 
@@ -190,12 +203,63 @@ public:
         }
         return m_storage->saveAll(dataList, targetUri);
     }
+
+	void setMoviesType(DefectShapeItem* item)
+	{
+		switch (item->m_elementType)
+		{
+		case Type_Cp3:
+		{
+			item->setLocked(true);
+			break;
+		}
+		case Type_Chain:
+		{
+			item->setLocked(true);
+			break;
+		}
+		case Type_Disease:
+		{
+			item->setMoveAxis(Axis_Free);
+			break;
+		}
+		case Type_Ring:
+		{
+			item->setMoveAxis(Axis_Horizontal);
+			break;
+		}
+		case Type_Section:
+		{
+			item->setMoveAxis(Axis_Horizontal);
+			break;
+		}
+		case Type_Platform:
+		{
+			item->setMoveAxis(Axis_Horizontal);
+			break;
+		}
+		default:
+			break;
+		}
+	}
+
+	// 根据ID找item
+	DefectShapeItem* getItemUseId(int uuid)
+	{
+		return m_items.value(uuid);
+	}
+
+signals:
+	void sigDefectMoved(DefectData item);
+
 private:
     QGraphicsScene* m_scene;
-    QList<DefectShapeItem*> m_items;
+    //QList<DefectShapeItem*> m_items;
+	QHash<int ,DefectShapeItem*> m_items;
+
     IDefectStorage* m_storage;
     QMap<int, DefectStyle> m_styles;
     QString m_currentUri;
 
-    QMap<int, DefectTypeConfig> m_configs; 
+    QMap<int, DefectTypeConfig> m_configs; // 💥 新字典：业务代码 -> 配置
 };

@@ -19,9 +19,10 @@ public:
     // 🟢 增加 deactivate 虚函数声明，允许子类在取消工具时清理垃圾（比如没画完的虚线）
     virtual void deactivate() {}
 
-    virtual void cancelDrawing() {}; // 🟢 清空当前正在画的所有点
+	virtual void cancelDrawing() {}; // 🟢 清空当前正在画的所有点
 
 	virtual void undoLastPoint() {}; // 🟢 撤销上一个点（仅对线和面有效）
+
 protected:
     TiledGraphicsView* m_view = nullptr;
 };

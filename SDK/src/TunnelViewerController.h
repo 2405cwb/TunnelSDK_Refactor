@@ -23,9 +23,11 @@ public:
 
     // 2. 核心接口：一键加载整个项目
     // path: 包含所有切片文件夹的根目录，例如 "C:/Projects/Tunnel_01"
-    bool loadRoute(const QString& rootPath);
-     
-    
+	bool loadRoute(const QString& rootPath);
+	QList<DbImageInfo> scanDatabaseFolder(const QString& rootFolder);
+	void setMaxRouteSections(int maxSections);
+	int maxRouteSections() const;
+
     QString getRootPath()
 		const {
 		return m_rootPath;
@@ -33,14 +35,22 @@ public:
     // 4. 清空场景
     void clear();
 
+	// 区间图像名
+	QString m_strBegImageName;
+	QString m_strEndImageName; 
+
+    QStringList m_curTunnelNames;
+
 private:
+	void restoreViewUpdates(bool blockSignals);
+
     TiledGraphicsView* m_view;
     AbstractSourceFactory* m_factory;
 
     //图片根目录
     QString m_rootPath; 
+	int m_maxRouteSections;
 
-    QList<DbImageInfo> scanDatabaseFolder(const QString& rootFolder);
     // 记录当前加载到了多长（像素），方便追加
     //double m_currentTotalLength;
 };

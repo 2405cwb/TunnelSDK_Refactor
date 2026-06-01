@@ -9,17 +9,19 @@
 
 class AbstractSourceFactory {
 public:
+	virtual ~AbstractSourceFactory() {}
+
     // 给定一个文件夹路径，返回一个构造好的数据源
     virtual AbstractTileSource* create(const QString& folderPath) = 0;
 
     // 🟢 2. 新增：自定义排序策略 (虚方法，提供默认实现)
     // 默认使用 Windows 风格的自然排序
     virtual void sortDatabaseFolder(QList<DbImageInfo>& names) {
-        QCollator collator;
-        collator.setNumericMode(true); // 默认开启智能数字排序
-        std::sort(names.begin(), names.end(), [&collator](const DbImageInfo& a, const DbImageInfo& b) {
-            return collator.compare(a.originalName, b.originalName) < 0;
-        });
+		QCollator collator;
+		collator.setNumericMode(true); // 默认开启智能数字排序
+		std::sort(names.begin(), names.end(), [&collator](const DbImageInfo& a, const DbImageInfo& b) {
+			return collator.compare(a.originalName, b.originalName) < 0;
+		});
     }
 
   

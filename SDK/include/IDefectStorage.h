@@ -1,6 +1,6 @@
 #pragma once 
 // 存储抽象接口
-#include "DefectSystem.h"
+#include "TunnelGlobal.h"
 class IDefectStorage {
 public:
     virtual ~IDefectStorage() = default;

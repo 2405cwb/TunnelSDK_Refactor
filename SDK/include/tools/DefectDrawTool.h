@@ -10,13 +10,15 @@ public:
     // 构造时传入要画什么形状
     DefectDrawTool(DrawShape shapeType) : m_shapeType(shapeType), m_previewItem(nullptr) {}
 
-    void ChangeShpeType(DrawShape shapeType) {
-        m_shapeType = shapeType;
-        // 切换形状时，清空当前点和预览
-        m_points.clear();
-        if (m_previewItem) {
-            m_previewItem->setPath(QPainterPath());
-        }
+	void ChangeShapeType(DrawShape shapeType)
+	{
+		m_shapeType = shapeType;
+
+		m_points.clear();
+		if (m_previewItem)
+		{
+			m_previewItem->setPath(QPainterPath());
+		}
 	}
 
     void handleMousePress(QPointF scenePos, Qt::MouseButton button) override {
@@ -59,61 +61,61 @@ public:
         m_points.clear();
     }
 
-    void undoLastPoint()
-{
-    // 1. 如果还没点下任何点，直接无视
-    if (m_points.isEmpty()) {
-        return;
-    }
+	void undoLastPoint()
+	{
+		// 1. 如果还没点下任何点，直接无视
+		if (m_points.isEmpty()) {
+			return;
+		}
 
-    // 2. 踢掉最后一个确定点！
-    m_points.removeLast();
+		// 2. 踢掉最后一个确定点！
+		m_points.removeLast();
 
-    // 3. 边缘情况：如果点全删光了，彻底清空画面，回到刚按下 F3/F4 的初始状态
-    if (m_points.isEmpty()) {
-        if (m_previewItem) {
-            m_previewItem->setPath(QPainterPath());
-        }
-        qDebug() << QString::fromLocal8Bit("🔙 撤销了起点，等待重新绘制...");
-        return;
-    }
+		// 3. 边缘情况：如果点全删光了，彻底清空画面，回到刚按下 F3/F4 的初始状态
+		if (m_points.isEmpty()) {
+			if (m_previewItem) {
+				m_previewItem->setPath(QPainterPath());
+			}
+			qDebug() << QString::fromLocal8Bit("🔙 撤销了起点，等待重新绘制...");
+			return;
+		}
 
-    // 4. 重建剩下的确定路线
-    QPainterPath newPath;
-    newPath.moveTo(m_points.first());
-    for (int i = 1; i < m_points.size(); ++i) {
-        newPath.lineTo(m_points[i]);
-    }
+		// 4. 重建剩下的确定路线
+		QPainterPath newPath;
+		newPath.moveTo(m_points.first());
+		for (int i = 1; i < m_points.size(); ++i) {
+			newPath.lineTo(m_points[i]);
+		}
 
-    // 5. 让橡皮筋线重新连上当前的鼠标！
-    // 因为你在 Tool 里保存了 view 的指针 m_view，我们可以随时获取当前鼠标的真实位置
-    QPointF currentMousePos = m_view->mapToScene(m_view->mapFromGlobal(QCursor::pos()));
-    
-    QPainterPath tempPath = newPath;
-    tempPath.lineTo(currentMousePos);
+		// 5. 让橡皮筋线重新连上当前的鼠标！
+		// 因为你在 Tool 里保存了 view 的指针 m_view，我们可以随时获取当前鼠标的真实位置
+		QPointF currentMousePos = m_view->mapToScene(m_view->mapFromGlobal(QCursor::pos()));
 
-    // 6. 刷新屏幕
-    if (m_previewItem) {
-        m_previewItem->setPath(tempPath);
-    }
-    
-    qDebug() << "🔙 成功撤销上一个点，当前剩余点数:" << m_points.size();
-}
+		QPainterPath tempPath = newPath;
+		tempPath.lineTo(currentMousePos);
 
-    void cancelDrawing() override {
-    // 如果本来就没开始点，直接返回
-    if (m_points.isEmpty()) {
-        return;
-    }
+		// 6. 刷新屏幕
+		if (m_previewItem) {
+			m_previewItem->setPath(tempPath);
+		}
 
-    // 1. 清空所有点位数组
-    m_points.clear();
+		qDebug() << "🔙 成功撤销上一个点，当前剩余点数:" << m_points.size();
+	}
 
-    // 2. 擦除屏幕上的临时预览虚线
-    if (m_previewItem) {
-        m_previewItem->setPath(QPainterPath());
-    }
-}
+	void cancelDrawing() override {
+		// 如果本来就没开始点，直接返回
+		if (m_points.isEmpty()) {
+			return;
+		}
+
+		// 1. 清空所有点位数组
+		m_points.clear();
+
+		// 2. 擦除屏幕上的临时预览虚线
+		if (m_previewItem) {
+			m_previewItem->setPath(QPainterPath());
+		}
+	}
 
 private:
     void updatePreview(const QPointF& currentMousePos) {
@@ -131,7 +133,9 @@ private:
 
         if (!m_previewItem) {
             m_previewItem = new QGraphicsPathItem();
-            m_previewItem->setPen(QPen(Qt::cyan, 2, Qt::DashLine));
+			QPen pen(Qt::red, 1, Qt::DashLine);
+			pen.setCosmetic(true);
+            m_previewItem->setPen(pen);
             m_view->scene()->addItem(m_previewItem);
         }
         m_previewItem->setPath(path);
@@ -156,8 +160,14 @@ private:
         if (m_view) {
             // 工具不创建 Item！而是通知 View 把纯几何数据抛给上层！
             m_view->emitGeometryDrawn(m_shapeType, path);
+
+			
         }
-        deactivate();
+		if (m_previewItem)
+		{
+			deactivate();
+
+		}
     }
 
 private:

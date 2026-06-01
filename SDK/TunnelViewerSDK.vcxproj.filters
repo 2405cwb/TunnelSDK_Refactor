@@ -26,10 +26,10 @@
       <Extensions>cpp;c;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
     </Filter>
     <Filter Include="items">
-      <UniqueIdentifier>{a9a6c096-6e20-4160-be68-dd1e02e66479}</UniqueIdentifier>
+      <UniqueIdentifier>{20af7731-4553-425c-8ee0-58be0d31cdf6}</UniqueIdentifier>
     </Filter>
     <Filter Include="tools">
-      <UniqueIdentifier>{1b50502d-973d-4909-b4f9-f1e14e0c7c36}</UniqueIdentifier>
+      <UniqueIdentifier>{257223f7-edb1-4149-9e8c-761c9029bc36}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -43,7 +43,7 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="include\items\DefectShapeItem.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>items</Filter>
     </ClCompile>
     <ClCompile Include="src\TunnelViewerController.cpp">
       <Filter>Source Files</Filter>
@@ -62,23 +62,20 @@
     <QtMoc Include="src\TunnelSectionItem.h">
       <Filter>Header Files</Filter>
     </QtMoc>
-    <ClInclude Include="include\AbstractSourceFactory.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="include\IDefectStorage.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="include\tools\DefectDrawTool.h">
+      <Filter>tools</Filter>
     </ClInclude>
     <ClInclude Include="include\tools\AbstractTool.h">
       <Filter>tools</Filter>
     </ClInclude>
-    <ClInclude Include="include\tools\DefectDrawTool.h">
-      <Filter>tools</Filter>
-    </ClInclude>
-    <ClInclude Include="include\DefectSystem.h">
-      <Filter>items</Filter>
+    <ClInclude Include="include\IDefectStorage.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="include\TunnelGlobal.h">
-      <Filter>tools</Filter>
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\AbstractSourceFactory.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -90,11 +87,11 @@
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
-    <QtMoc Include="src\TunnelViewerController.h">
-      <Filter>Header Files</Filter>
-    </QtMoc>
     <QtMoc Include="include\DefectManager.h">
       <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="src\TunnelViewerController.h">
+      <Filter>Source Files</Filter>
     </QtMoc>
     <QtMoc Include="include\items\DefectShapeItem.h">
       <Filter>items</Filter>
